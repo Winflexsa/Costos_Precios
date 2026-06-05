@@ -252,11 +252,20 @@ table tr.total td{font-weight:700;background:var(--teal-l);border-top:1.5px soli
    WINFLEX · COSTOS & PRECIOS — single file app
    ============================================================ */
 
-/* ---- CONFIG (pegá tu master key + bin para sync en la nube) ---- */
+/* ╔═══════════════════════════════════════════════════════════════╗
+   ║  >>> ACÁ VA LA CONFIGURACIÓN DE LA NUBE <<<                      ║
+   ║  Pegá los dos valores entre las comillas "" y subí el archivo.  ║
+   ║  Sin esto la app guarda solo en este dispositivo (no sincroniza)║
+   ╚═══════════════════════════════════════════════════════════════╝ */
 const CONFIG = {
   ADMIN_PIN: "1205",
-  JSONBIN_KEY: "",          // <-- pegá tu X-Master-Key de JSONBin
-  JSONBIN_BIN_ID: "",       // <-- pegá el bin ID (o dejá vacío y se crea uno)
+
+  // 1) Tu Master Key de JSONBin (la misma del resto de las apps).
+  JSONBIN_KEY: "PEGAR_MASTER_KEY_ACA",
+
+  // 2) El Bin ID que creaste en jsonbin.io para esta app.
+  JSONBIN_BIN_ID: "PEGAR_BIN_ID_ACA",
+
   LS_KEY: "winflex_costos_v1"
 };
 
@@ -435,8 +444,9 @@ const SEED = {
    STATE + PERSISTENCE
    ============================================================ */
 let S = null;               // estado vivo
-let binId = CONFIG.JSONBIN_BIN_ID;
-const useCloud = ()=> !!CONFIG.JSONBIN_KEY;
+const _ph=v=>!v||/^PEGAR_/.test(v);          // placeholder sin reemplazar
+let binId = _ph(CONFIG.JSONBIN_BIN_ID)?'':CONFIG.JSONBIN_BIN_ID;
+const useCloud = ()=> !_ph(CONFIG.JSONBIN_KEY);
 let saveTimer=null;
 
 function deepMerge(base,ovr){ // mantener estructura si el seed creció

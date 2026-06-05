@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Winflex · Costos & Precios</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<style>
+:root{
+  --bg:#e9edf0; --card:#ffffff; --ink:#15201f; --ink2:#445049; --muted:#7e8a85;
+  --line:#dde3e6; --line2:#eef2f4;
+  --teal:#0b6b63; --teal-d:#084f49; --teal-l:#e6f1f0; --teal-l2:#f1f8f7;
+  --amber:#c8761a; --amber-l:#fbf0e2;
+  --green:#1f9d57; --green-l:#e7f6ee;
+  --yellow:#d99a08; --yellow-l:#fcf4dd;
+  --red:#d64545; --red-l:#fbe9e9;
+  --blue:#2563a8; --blue-l:#e8f0f9;
+  --shadow:0 1px 2px rgba(20,32,31,.06),0 4px 16px rgba(20,32,31,.05);
+  --shadow-lg:0 12px 40px rgba(20,32,31,.16);
+  --r:14px; --r-sm:9px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans',sans-serif;-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.45}
+body{background-image:radial-gradient(circle at 18% -8%,rgba(11,107,99,.07),transparent 42%),radial-gradient(circle at 100% 0%,rgba(200,118,26,.05),transparent 36%);min-height:100vh}
+.mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+h1,h2,h3,h4{font-family:'Archivo',sans-serif;font-weight:700;letter-spacing:-.01em;line-height:1.15}
+button{font-family:inherit;cursor:pointer}
+input,select{font-family:inherit;font-size:14px}
+a{color:var(--teal);text-decoration:none}
+
+/* ---------- LOGIN ---------- */
+#login{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(150deg,#0b6b63,#063d39 70%);padding:24px}
+.login-card{background:var(--card);border-radius:20px;padding:38px 34px;width:100%;max-width:380px;box-shadow:var(--shadow-lg);text-align:center}
+.login-card .logo{font-family:'Archivo';font-weight:800;font-size:30px;letter-spacing:-.03em;color:var(--teal)}
+.login-card .logo span{color:var(--amber)}
+.login-card p{color:var(--muted);font-size:13px;margin:6px 0 26px}
+.pin-field{position:relative;margin-bottom:16px}
+.pin-field input{width:100%;height:56px;border:1.5px solid var(--line);border-radius:13px;background:#fff;
+  text-align:center;font-family:'IBM Plex Mono';font-size:30px;font-weight:600;letter-spacing:.5em;
+  color:var(--ink);padding:0 0 0 .5em;transition:.15s;outline:none;box-sizing:border-box}
+.pin-field input::placeholder{letter-spacing:.18em;font-size:15px;font-weight:500;color:var(--muted)}
+.pin-field input:focus{border-color:var(--teal);box-shadow:0 0 0 4px var(--teal-l)}
+.pin-field input.shake{animation:shake .4s}
+@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-7px)}40%,80%{transform:translateX(7px)}}
+.login-btn{width:100%;height:50px;border:none;border-radius:13px;background:var(--teal);color:#fff;
+  font-family:'Archivo';font-weight:700;font-size:15px;letter-spacing:.02em;cursor:pointer;transition:.15s}
+.login-btn:hover{background:#084f49}
+.login-btn:active{transform:scale(.98)}
+.login-err{color:var(--red);font-size:13px;height:18px;margin-top:14px;font-weight:500}
+
+/* ---------- SHELL ---------- */
+#app{display:none;max-width:1320px;margin:0 auto;padding:0 20px 60px}
+header.top{display:flex;align-items:center;gap:18px;padding:18px 4px 16px;flex-wrap:wrap}
+.brand{font-family:'Archivo';font-weight:800;font-size:22px;letter-spacing:-.03em;color:var(--teal);white-space:nowrap}
+.brand span{color:var(--amber)}
+.brand small{display:block;font-family:'IBM Plex Sans';font-weight:500;font-size:11px;letter-spacing:.04em;color:var(--muted);text-transform:uppercase;margin-top:1px}
+.top-spacer{flex:1}
+.tc-box{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:9px 14px;box-shadow:var(--shadow)}
+.tc-box .lab{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;line-height:1.1}
+.tc-box .lab b{display:block;font-size:9px;color:var(--teal);font-weight:600}
+.tc-box input{width:78px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;text-align:right;font-weight:600;color:var(--ink);background:var(--teal-l2)}
+.tc-box .src{font-size:10px;color:var(--muted);max-width:120px;line-height:1.25}
+.tc-box .src b{color:var(--green)}
+.icon-btn{width:38px;height:38px;border-radius:11px;border:1px solid var(--line);background:var(--card);display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:var(--shadow);transition:.14s}
+.icon-btn:hover{border-color:var(--teal);background:var(--teal-l)}
+
+/* nav */
+nav.tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:6px;box-shadow:var(--shadow);margin-bottom:22px;overflow-x:auto}
+nav.tabs button{flex:1;min-width:120px;border:none;background:transparent;padding:11px 14px;border-radius:9px;font-weight:600;font-size:13.5px;color:var(--ink2);display:flex;align-items:center;justify-content:center;gap:8px;transition:.15s;white-space:nowrap}
+nav.tabs button .dot{width:9px;height:9px;border-radius:3px}
+nav.tabs button:hover{background:var(--line2)}
+nav.tabs button.active{background:var(--teal);color:#fff;box-shadow:0 4px 12px rgba(11,107,99,.28)}
+nav.tabs button.active .dot{background:rgba(255,255,255,.85)!important}
+
+.page{display:none;animation:fade .3s ease}
+.page.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ---------- COMMON UI ---------- */
+.section-head{display:flex;align-items:flex-end;gap:14px;margin:4px 2px 16px;flex-wrap:wrap}
+.section-head h2{font-size:24px}
+.section-head .sub{color:var(--muted);font-size:13px;margin-top:2px}
+.section-head .sh-spacer{flex:1}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.card-h{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line2)}
+.card-h h3{font-size:15px}
+.card-h .tag{margin-left:auto;font-size:11px;color:var(--muted);font-weight:500}
+.card-b{padding:16px 18px}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:1fr 1fr}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:880px){.g2,.g3,.g4{grid-template-columns:1fr}}
+
+.btn{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:9px 15px;border-radius:10px;font-weight:600;font-size:13px;display:inline-flex;align-items:center;gap:7px;transition:.14s;box-shadow:var(--shadow)}
+.btn:hover{border-color:var(--teal);background:var(--teal-l)}
+.btn.primary{background:var(--teal);border-color:var(--teal);color:#fff}
+.btn.primary:hover{background:var(--teal-d)}
+.btn.amber{background:var(--amber);border-color:var(--amber);color:#fff}
+.btn.amber:hover{filter:brightness(.94)}
+.btn.ghost{box-shadow:none;background:transparent}
+.btn.sm{padding:6px 11px;font-size:12px;border-radius:8px}
+
+/* stats */
+.stat{padding:16px 18px}
+.stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+.stat .v{font-family:'Archivo';font-weight:700;font-size:27px;letter-spacing:-.02em;margin-top:4px}
+.stat .v small{font-size:14px;color:var(--muted);font-weight:600}
+.stat .d{font-size:12px;color:var(--muted);margin-top:3px}
+.stat.accent{background:linear-gradient(140deg,var(--teal),var(--teal-d));color:#fff;border-color:var(--teal-d)}
+.stat.accent .k{color:rgba(255,255,255,.75)}
+.stat.accent .d{color:rgba(255,255,255,.78)}
+
+/* tables */
+.tbl-wrap{overflow-x:auto;border-radius:var(--r)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+table th{background:var(--teal-l2);color:var(--ink2);font-weight:600;text-align:right;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0}
+table th:first-child,table td:first-child{text-align:left}
+table td{padding:9px 12px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap}
+table tr:last-child td{border-bottom:none}
+table tbody tr:hover{background:var(--teal-l2)}
+table .num{font-family:'IBM Plex Mono';font-variant-numeric:tabular-nums}
+table tr.total td{font-weight:700;background:var(--teal-l);border-top:2px solid var(--teal)}
+.tinp{width:100%;max-width:90px;border:1px solid var(--line);border-radius:7px;padding:5px 7px;text-align:right;font-family:'IBM Plex Mono';background:#fffdf7;color:var(--ink)}
+.tinp:focus{outline:none;border-color:var(--teal);background:#fff;box-shadow:0 0 0 3px var(--teal-l)}
+.tinp.edited{border-color:var(--amber);background:var(--amber-l)}
+.tsel{border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:#fff}
+
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;line-height:1.4}
+.pill::before{content:'';width:7px;height:7px;border-radius:50%}
+.pill.v{background:var(--green-l);color:var(--green)}.pill.v::before{background:var(--green)}
+.pill.a{background:var(--yellow-l);color:var(--yellow)}.pill.a::before{background:var(--yellow)}
+.pill.r{background:var(--red-l);color:var(--red)}.pill.r::before{background:var(--red)}
+.delta{font-weight:600;font-size:12px}
+.delta.up{color:var(--green)}.delta.down{color:var(--red)}.delta.flat{color:var(--muted)}
+
+/* labeled inputs (params) */
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:13px}
+.field label{font-size:12px;font-weight:600;color:var(--ink2)}
+.field label small{display:block;font-weight:400;color:var(--muted);font-size:11px;margin-top:1px}
+.field .iw{display:flex;align-items:center;gap:8px}
+.field input,.field select{flex:1;border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:#fffdf7;color:var(--ink);font-family:'IBM Plex Mono'}
+.field input:focus,.field select:focus{outline:none;border-color:var(--teal);background:#fff;box-shadow:0 0 0 3px var(--teal-l)}
+.field .unit{font-size:12px;color:var(--muted);min-width:48px}
+.params-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 26px}
+@media(max-width:680px){.params-grid{grid-template-columns:1fr}}
+.params-sub{grid-column:1/-1;font-family:'Archivo';font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--teal);margin:14px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line2)}
+
+/* breakdown bar */
+.bd{display:flex;height:13px;border-radius:7px;overflow:hidden;margin:10px 0 6px;background:var(--line2)}
+.bd span{height:100%}
+.bd-leg{display:flex;flex-wrap:wrap;gap:10px 16px;font-size:11.5px;color:var(--ink2)}
+.bd-leg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;vertical-align:middle}
+
+/* modal */
+.modal-bg{position:fixed;inset:0;background:rgba(15,30,28,.5);backdrop-filter:blur(3px);z-index:150;display:none;align-items:center;justify-content:center;padding:20px}
+.modal-bg.open{display:flex}
+.modal{background:var(--card);border-radius:18px;width:100%;max-width:560px;max-height:88vh;overflow:auto;box-shadow:var(--shadow-lg);animation:pop .22s ease}
+@keyframes pop{from{opacity:0;transform:scale(.96) translateY(8px)}to{opacity:1;transform:none}}
+.modal-h{padding:20px 22px 0;display:flex;align-items:flex-start;gap:12px}
+.modal-h h3{font-size:19px;flex:1}
+.modal-h .x{border:none;background:var(--line2);width:32px;height:32px;border-radius:9px;font-size:17px;color:var(--ink2)}
+.modal-h .x:hover{background:var(--red-l);color:var(--red)}
+.modal-b{padding:16px 22px 22px}
+.modal-foot{display:flex;gap:10px;justify-content:flex-end;padding:0 22px 22px}
+
+/* simulator */
+.sim-row{display:grid;grid-template-columns:1.4fr 1fr 1fr 70px;gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line2);font-size:13px}
+.sim-row.head{font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid var(--line)}
+.sim-row input{border:1px solid var(--line);border-radius:8px;padding:7px 9px;text-align:right;font-family:'IBM Plex Mono';background:#fffdf7;width:100%}
+.sim-row .base{color:var(--muted);font-family:'IBM Plex Mono';text-align:right}
+
+.banner{padding:12px 16px;border-radius:11px;font-size:13px;display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.banner.warn{background:var(--amber-l);color:#8a5212;border:1px solid #f0d7b3}
+.banner.info{background:var(--blue-l);color:#1d4e82;border:1px solid #c5dcf2}
+.banner.ok{background:var(--green-l);color:#15703d;border:1px solid #bfe6cf}
+.note{font-size:12px;color:var(--muted);line-height:1.5}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:12px 20px;border-radius:11px;font-size:13.5px;font-weight:500;box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;transition:.25s;z-index:300}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.err{background:var(--red)}
+.toast.ok{background:var(--green)}
+.empty{text-align:center;color:var(--muted);padding:34px 16px;font-size:13px}
+.chip{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:7px;background:var(--line2);color:var(--ink2)}
+.chip.teal{background:var(--teal-l);color:var(--teal)}
+.row-actions{display:flex;gap:6px;justify-content:flex-end}
+.mini-x{border:none;background:transparent;color:var(--muted);font-size:15px;padding:2px 6px;border-radius:6px}
+.mini-x:hover{background:var(--red-l);color:var(--red)}
+.search{border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-width:200px;background:#fff}
+.search:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-l)}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login">
+  <div class="login-card">
+    <div class="logo">WIN<span>FLEX</span></div>
+    <p>Costos &amp; Precios · acceso restringido</p>
+    <div class="pin-field">
+      <input id="pinInput" type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="PIN de acceso">
+    </div>
+    <button class="login-btn" id="pinGo">Entrar</button>
+    <div class="login-err" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <header class="top">
+    <div class="brand">WIN<span>FLEX</span><small>Costos &amp; Precios</small></div>
+    <div class="top-spacer"></div>
+    <div class="tc-box">
+      <div class="lab">TC oper.<b id="tcSrc">manual</b></div>
+      <input id="tcInput" class="mono" type="number" step="1">
+      <button class="btn sm ghost" id="tcRefresh" title="Traer dólar BNA">⟳ BNA</button>
+    </div>
+    <button class="icon-btn" id="btnHistory" title="Historial de listas">🕘</button>
+    <button class="icon-btn" id="btnSettings" title="Configuración / sync">⚙️</button>
+    <button class="icon-btn" id="btnLogout" title="Salir">⎋</button>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="dash" class="active"><span class="dot" style="background:var(--ink)"></span>Resumen</button>
+    <button data-tab="pet"><span class="dot" style="background:var(--blue)"></span>PET Lámina</button>
+    <button data-tab="pe"><span class="dot" style="background:var(--amber)"></span>Film PE</button>
+    <button data-tab="petpe"><span class="dot" style="background:var(--teal)"></span>Laminado PET/PE</button>
+    <button data-tab="bandejas"><span class="dot" style="background:var(--green)"></span>Bandejas</button>
+  </nav>
+
+  <section class="page active" id="page-dash"></section>
+  <section class="page" id="page-pet"></section>
+  <section class="page" id="page-pe"></section>
+  <section class="page" id="page-petpe"></section>
+  <section class="page" id="page-bandejas"></section>
+</div>
+
+<!-- generic modal -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal" id="modal"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   WINFLEX · COSTOS & PRECIOS — single file app
+   ============================================================ */
+
+/* ---- CONFIG (pegá tu master key + bin para sync en la nube) ---- */
+const CONFIG = {
+  ADMIN_PIN: "1205",
+  JSONBIN_KEY: "",          // <-- pegá tu X-Master-Key de JSONBin
+  JSONBIN_BIN_ID: "",       // <-- pegá el bin ID (o dejá vacío y se crea uno)
+  LS_KEY: "winflex_costos_v1"
+};
+
+/* ---- helpers ---- */
+const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
+const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+const num=v=>{const n=parseFloat(String(v).replace(',','.'));return isNaN(n)?0:n;};
+const usd=(v,d=2)=>'$'+(v||0).toLocaleString('es-AR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const ars=(v,d=0)=>'$'+(v||0).toLocaleString('es-AR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=(v,d=1)=>((v||0)*100).toLocaleString('es-AR',{minimumFractionDigits:d,maximumFractionDigits:d})+'%';
+const today=()=>new Date().toLocaleDateString('es-AR');
+const nowISO=()=>new Date().toISOString();
+function toast(msg,type=''){const t=$('#toast');t.textContent=msg;t.className='toast show '+type;setTimeout(()=>t.className='toast',2200);}
+function semaforo(margin,green=0.30,yellow=0.15){return margin>=green?'v':margin>=yellow?'a':'r';}
+function semLabel(c){return c==='v'?'Saludable':c==='a'?'Ajustado':'Crítico';}
+
+/* ============================================================
+   SEED DATA — extraído de los 4 Excel de Winflex
+   ============================================================ */
+const SEED = {
+  meta:{ version:1, updated:nowISO() },
+  tc:{ value:1420, mode:"auto", lastFetch:null, lastSrc:"manual" },
+
+  /* ---------------- FILM PE (insumo interno) ---------------- */
+  pe:{
+    params:{ valorHora:8500, cargas:1.5, operarios:1.5, prodHora:30,
+      motores:6, consumoMotor:2.79, usdkwh:0.05, otrosVarios:0.01, otrosIndirectos:0.01, merma:0.10 },
+    insumos:[
+      {cod:"PE01",desc:"PEBDC TN 7006",prov:"Alta Plástica",usd:3,upd:"30/03/2026"},
+      {cod:"PE02",desc:"PEBDC TS 7006",prov:"Alta Plástica",usd:3,upd:"03/03/2026"},
+      {cod:"PE03",desc:"CO PE LDPE 206M BG6025",prov:"Grupo Simpa",usd:3,upd:"06/03/2026"},
+      {cod:"PE04",desc:"CO PE LDPE 207M BG6025",prov:"Grupo Simpa",usd:3,upd:"06/03/2026"},
+      {cod:"PE05",desc:"CO PE DOWLEX NG2045",prov:"Grupo Simpa",usd:3,upd:"07/10/2025"},
+      {cod:"PE06",desc:"PEADC GF-4950",prov:"Alta Plástica",usd:3,upd:"23/02/2026"}
+    ],
+    receta:[ {cod:"PE01",p:1}, {cod:"PE02",p:0}, {cod:"PE03",p:0} ]
+  },
+
+  /* ---------------- PET LÁMINA (7 variantes + clientes) ---------------- */
+  pet:{
+    params:{ energia:0.20, valorHora:8500, cargas:1.5, operarios:2.5, prodHora:300,
+      otrosVarios:0.01, otrosIndirectos:0.01, merma:0.12, recuperacion:0.11,
+      conoARSkg:1852, conoKgBobina:2, kgBobinaProd:200, palletARS:6500, palletCap:500,
+      stretchPct:0.5, fletePallet:50000, pctFlete:1 },
+    net:{ admin:0.02, iibb:0.035, dyc:0.015, financiero:0.03, ganancias:0.35 },
+    insumos:[
+      {cod:"MP01",desc:"Preforma cristal molida",tipo:"PET reciclado",usd:1.15},
+      {cod:"MP02",desc:"Scrap interno (recuperado)",tipo:"PET reciclado",usd:0.90},
+      {cod:"MP03",desc:"PET virgen B90A",tipo:"PET virgen",usd:1.80},
+      {cod:"MP04",desc:"Master Blanco (TiO2)",tipo:"Masterbatch",usd:8.45},
+      {cod:"MP05",desc:"Master Negro (carbon black)",tipo:"Masterbatch",usd:5.75},
+      {cod:"MP06",desc:"Master Azulino",tipo:"Masterbatch",usd:22.87},
+      {cod:"MP07",desc:"Master Gris (placeholder)",tipo:"Masterbatch",usd:22.87},
+      {cod:"MP08",desc:"Antiblocking (placeholder)",tipo:"Aditivo",usd:8}
+    ],
+    // receta: % de [MP01,MP02,MP03,MP04,MP05,MP06]
+    variantes:[
+      {nom:"rPET Cristal",      r:[0.70,0.30,0,0,0,0]},
+      {nom:"rPET Blanco",       r:[0.68,0.30,0,0.02,0,0]},
+      {nom:"rPET Negro",        r:[0.68,0.30,0,0,0.02,0]},
+      {nom:"rPET Azulino",      r:[0.68,0.30,0,0,0,0.02]},
+      {nom:"rPET Blanco AB",    r:[0.68,0.30,0,0.02,0,0]},
+      {nom:"PET Virgen Cristal",r:[0,0,1,0,0,0]},
+      {nom:"PET Virgen Azulino",r:[0,0,0.98,0,0,0.02]}
+    ],
+    clientes:[
+      {cli:"SILMAG",v:5,ant:7.08,act:7.43},
+      {cli:"LADAGA",v:0,ant:4.20,act:4.20},
+      {cli:"ALGLO",v:0,ant:4.05,act:4.05},
+      {cli:"ROOJ BOX",v:0,ant:4.05,act:4.05},
+      {cli:"BIOPROTECE",v:3,ant:4.80,act:4.80},
+      {cli:"DARIO (SyB)",v:3,ant:4.80,act:4.80},
+      {cli:"EXPRESIÓN GRÁF.",v:0,ant:3.65,act:3.65},
+      {cli:"SATELLITE",v:0,ant:3.65,act:3.65},
+      {cli:"ARIAS (Corradi)",v:1,ant:3.80,act:3.99},
+      {cli:"DARIO (SyB)",v:1,ant:3.53,act:3.71},
+      {cli:"DARIO (SyB)",v:0,ant:3.35,act:3.35},
+      {cli:"JC PACKING",v:0,ant:3.25,act:3.25},
+      {cli:"COLGATE",v:0,ant:3.24,act:3.24},
+      {cli:"LABOUREAU",v:0,ant:3.23,act:3.23},
+      {cli:"COOPER",v:0,ant:3.17,act:3.17},
+      {cli:"ALFERNET",v:0,ant:2.96,act:2.97},
+      {cli:"DECORATE",v:0,ant:2.86,act:2.86},
+      {cli:"TRIGGER/GAPE",v:4,ant:2.93,act:3.08},
+      {cli:"BLIBOX",v:2,ant:2.82,act:2.96},
+      {cli:"BLIBOX",v:1,ant:2.88,act:3.02},
+      {cli:"BARIEL PACK",v:0,ant:2.70,act:2.70},
+      {cli:"BLIGRAF",v:0,ant:2.48,act:2.68},
+      {cli:"TRIGGER/GAPE",v:2,ant:2.71,act:2.86},
+      {cli:"INBIOMED",v:3,ant:3.26,act:3.42},
+      {cli:"DIEGO GODOY",v:2,ant:2.70,act:2.84},
+      {cli:"TRIGGER/GAPE",v:1,ant:2.77,act:2.91},
+      {cli:"BLIBOX",v:0,ant:2.62,act:2.62},
+      {cli:"BLIGRAF",v:2,ant:2.67,act:2.80},
+      {cli:"BLIGRAF",v:1,ant:2.73,act:2.87},
+      {cli:"BLIGRAF",v:5,ant:2.81,act:3.23},
+      {cli:"DIEGO GODOY",v:0,ant:2.52,act:2.52},
+      {cli:"TRIGGER/GAPE",v:0,ant:2.51,act:2.51}
+    ]
+  },
+
+  /* ---------------- LAMINADO PET/PE ---------------- */
+  petpe:{
+    params:{ costoLaminaPET:1.48, costoLaminaPE:3.83, densPET:1.35, densPE:0.92,
+      // laminado
+      salLam:14500, cargasLam:1.5, opLam:1, prodLam:110, motoresLam:2, consumoLam:2.79, usdkwhLam:0.05,
+      // refilado
+      salRef:8500, cargasRef:1.5, opRef:1, prodRef:83.3, motoresRef:1, consumoRef:2.79, usdkwhRef:0.05, otrosRef:0.02,
+      linkPET:false, linkPE:false },
+    adhesivos:[
+      {nom:"Loctite Liofol LA 3824 (tambor)",usd:6.49,pct:0.0091},
+      {nom:"Loctite Liofol LA 6201 (balde)",usd:7.99,pct:0.0009},
+      {nom:"Diluyente poliuretánico",usd:2.33,pct:0.01}
+    ],
+    net:{ admin:0.02, iibb:0.035, dyc:0.015, financiero:0.03, ganancias:0.35 },
+    productos:[
+      {cli:"Don Yeyo",med:"321x300",aPET:350,ePET:250,aPE:370,ePE:50,aFin:321,tiras:1,precio:3.38},
+      {cli:"Molinos",med:"472x235",aPET:500,ePET:200,aPE:530,ePE:35,aFin:472,tiras:1,precio:3.54},
+      {cli:"Molinos",med:"421x500",aPET:450,ePET:450,aPE:470,ePE:50,aFin:421,tiras:1,precio:3.32},
+      {cli:"Molinos",med:"421x300",aPET:450,ePET:250,aPE:470,ePE:50,aFin:421,tiras:1,precio:3.54},
+      {cli:"Molinos",med:"421x400",aPET:450,ePET:350,aPE:470,ePE:50,aFin:421,tiras:1,precio:3.32},
+      {cli:"MFA",med:"323x330",aPET:350,ePET:280,aPE:370,ePE:50,aFin:321,tiras:1,precio:3.82},
+      {cli:"MFA",med:"461x300",aPET:480,ePET:250,aPE:500,ePE:50,aFin:461,tiras:1,precio:3.82},
+      {cli:"Dantelli",med:"357x350",aPET:380,ePET:300,aPE:400,ePE:50,aFin:357,tiras:1,precio:3.69},
+      {cli:"Dantelli NEGRO",med:"357x350",aPET:380,ePET:300,aPE:400,ePE:50,aFin:357,tiras:1,precio:3.87},
+      {cli:"Dantelli",med:"323x350",aPET:350,ePET:300,aPE:370,ePE:50,aFin:323,tiras:1,precio:3.69},
+      {cli:"Huertas",med:"200x450",aPET:430,ePET:400,aPE:450,ePE:50,aFin:200,tiras:2,precio:3.96},
+      {cli:"Cadrinorte",med:"520x400",aPET:550,ePET:350,aPE:570,ePE:50,aFin:520,tiras:1,precio:3.78},
+      {cli:"La Italiana",med:"421x500",aPET:450,ePET:450,aPE:470,ePE:50,aFin:421,tiras:1,precio:3.62},
+      {cli:"La Italiana",med:"421x350",aPET:450,ePET:300,aPE:470,ePE:50,aFin:421,tiras:1,precio:3.62},
+      {cli:"El Artesano",med:"422x250",aPET:450,ePET:200,aPE:470,ePE:50,aFin:422,tiras:1,precio:3.67},
+      {cli:"Mendia",med:"312x300",aPET:350,ePET:250,aPE:370,ePE:50,aFin:312,tiras:1,precio:4.089},
+      {cli:"Smams",med:"255x250",aPET:530,ePET:200,aPE:550,ePE:50,aFin:255,tiras:2,precio:3.82}
+    ]
+  },
+
+  /* ---------------- BANDEJAS (termoformado) ---------------- */
+  bandejas:{
+    params:{ mpCristal:1.60, mpNegro:1.76, recuperacion:0.90,
+      salario:8000, operarios:3, cargas:0.5, energia:0.05,
+      semVerde:0.30, semAmarillo:0.15 },
+    productos:[
+      {cod:"E900",linea:"Ensaladera",mat:"Cristal",bruto:23.8,neto:17,vel:7000,otros:0.07},
+      {cod:"T900",linea:"Ensaladera",mat:"Cristal",bruto:15.95,neto:11,vel:7000,otros:0.07},
+      {cod:"S900",linea:"Ensaladera",mat:"Cristal",bruto:9.75,neto:6.5,vel:7000,otros:0.08},
+      {cod:"E910",linea:"Ensaladera",mat:"Negro",bruto:23.8,neto:17,vel:7000,otros:0.07},
+      {cod:"F40",linea:"Clamshell",mat:"Cristal",bruto:15.6,neto:12,vel:7000,otros:0.05},
+      {cod:"F41",linea:"Clamshell",mat:"Cristal",bruto:16.12,neto:12.4,vel:7000,otros:0.05},
+      {cod:"F43",linea:"Clamshell",mat:"Cristal",bruto:16.64,neto:12.8,vel:7000,otros:0.06},
+      {cod:"F50",linea:"Clamshell",mat:"Cristal",bruto:28.06,neto:23,vel:3500,otros:0.07},
+      {cod:"F61",linea:"Clamshell",mat:"Cristal",bruto:31.72,neto:26,vel:3500,otros:0.08},
+      {cod:"F63",linea:"Clamshell",mat:"Cristal",bruto:28.3,neto:23.2,vel:3500,otros:0.07}
+    ],
+    // ensaladeras: precios por cliente x producto. moneda USD/ARS, valor por millar
+    ensaladeras:[
+      {cli:"Bandex",mon:"USD",p:{E900:55,T900:37.4,S900:33,E910:59.4}},
+      {cli:"Nitopi",mon:"ARS",p:{E900:75494,T900:52845,S900:50000,E910:81530}},
+      {cli:"Winflex (directo)",mon:"ARS",p:{E900:94080,T900:65856,S900:60000,E910:101606.4}},
+      {cli:"Envases FS / Group",mon:"ARS",p:{E900:86779,T900:59554,S900:57000,E910:89331}}
+    ],
+    // clamshells: lista única USD/millar
+    clamshells:{ F40:39,F41:39,F43:39,F50:73,F61:80,F63:75 },
+    blueberry:["Apici","Arandalia","Arandeira","Berries del Sol","Alif Agro","Berries Mesopotámicos",
+      "Blueberries","Bulca","Cantallops Diego","Coop. Agrícola","Early Crop","Frutas Argentinas",
+      "Guerrero Fénix","La Esperanza","La Pampa","Los Pinos","NorBerries","NQN Berries","Pampa Berries",
+      "Patagonia Berries","Refsa","Río Negro Berries","San Pedro Frut","SudBerries","Traful Cupal",
+      "Trapiche Berries","Tres Pinos","Valle Andino","Vista Alegre","ZBlueberries"]
+  },
+
+  history:[]   // snapshots manuales de listas de precios
+};
+
+/* ============================================================
+   STATE + PERSISTENCE
+   ============================================================ */
+let S = null;               // estado vivo
+let binId = CONFIG.JSONBIN_BIN_ID;
+const useCloud = ()=> !!CONFIG.JSONBIN_KEY;
+let saveTimer=null;
+
+function deepMerge(base,ovr){ // mantener estructura si el seed creció
+  if(Array.isArray(base)) return ovr!=null?ovr:base;
+  if(typeof base==='object'&&base){ const o={...base};
+    for(const k in base) o[k]=deepMerge(base[k], ovr?ovr[k]:undefined);
+    if(ovr) for(const k in ovr) if(!(k in base)) o[k]=ovr[k];
+    return o; }
+  return ovr!=null?ovr:base;
+}
+
+async function loadState(){
+  let data=null;
+  if(useCloud()){
+    try{
+      if(!binId){ data=null; }
+      else{
+        const r=await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`,{headers:{'X-Master-Key':CONFIG.JSONBIN_KEY}});
+        if(r.ok){ const j=await r.json(); data=j.record; }
+      }
+    }catch(e){ console.warn('JSONBin load fail',e); }
+  }
+  if(!data){ try{ data=JSON.parse(localStorage.getItem(CONFIG.LS_KEY)); }catch(e){} }
+  S = data ? deepMerge(JSON.parse(JSON.stringify(SEED)), data) : JSON.parse(JSON.stringify(SEED));
+}
+
+function scheduleSave(){ clearTimeout(saveTimer); saveTimer=setTimeout(saveState,700); }
+async function saveState(){
+  S.meta.updated=nowISO();
+  try{ localStorage.setItem(CONFIG.LS_KEY,JSON.stringify(S)); }catch(e){}
+  if(useCloud()){
+    try{
+      if(!binId){
+        const r=await fetch('https://api.jsonbin.io/v3/b',{method:'POST',
+          headers:{'Content-Type':'application/json','X-Master-Key':CONFIG.JSONBIN_KEY,'X-Bin-Name':'winflex_costos'},
+          body:JSON.stringify(S)});
+        if(r.ok){ const j=await r.json(); binId=j.metadata.id; console.log('Nuevo bin creado:',binId); toast('Bin creado: '+binId,'ok'); }
+      }else{
+        await fetch(`https://api.jsonbin.io/v3/b/${binId}`,{method:'PUT',
+          headers:{'Content-Type':'application/json','X-Master-Key':CONFIG.JSONBIN_KEY},body:JSON.stringify(S)});
+      }
+    }catch(e){ console.warn('JSONBin save fail',e); }
+  }
+}
+function commit(){ scheduleSave(); }
+
+/* ---- Tipo de cambio ---- */
+async function fetchTC(){
+  try{
+    const r=await fetch('https://dolarapi.com/v1/dolares/oficial');
+    if(r.ok){ const j=await r.json(); const v=j.venta||j.compra;
+      if(v){ S.tc.value=v; S.tc.lastFetch=nowISO(); S.tc.lastSrc='BNA '+today();
+        if(S.tc.mode==='auto'){ commit(); } return v; } }
+  }catch(e){ console.warn('dolarapi fail',e); }
+  return null;
+}
+function TC(){ return num(S.tc.value)||1; }
+async function refreshTC(manual){
+  const v=await fetchTC();
+  if(v){ if(manual) S.tc.mode='auto'; renderTCBar(); renderAll(); commit(); toast('Dólar BNA: '+ars(v),'ok'); }
+  else toast('No se pudo traer el dólar','err');
+}
+function renderTCBar(){
+  $('#tcInput').value = Math.round(TC());
+  $('#tcSrc').textContent = S.tc.mode==='auto' ? (S.tc.lastSrc||'BNA') : 'manual';
+}
+
+/* ============================================================
+   CALC ENGINES  (replican las fórmulas de los Excel)
+   ============================================================ */
+
+/* ---- FILM PE ---- */
+function calcPE(){
+  const p=S.pe.params, tc=TC();
+  const energia=(p.motores*p.consumoMotor*p.usdkwh)/p.prodHora;
+  const MO=(p.valorHora*p.operarios*p.cargas)/p.prodHora/tc;
+  const proc=energia+MO+p.otrosVarios+p.otrosIndirectos;
+  const idx={}; S.pe.insumos.forEach(i=>idx[i.cod]=i.usd);
+  let mpBase=0; S.pe.receta.forEach(r=>mpBase+=r.p*(idx[r.cod]||0));
+  const factor=1/(1-p.merma);
+  const mpAjust=mpBase*factor;
+  const total=mpAjust+proc;
+  return {energia,MO,otros:p.otrosVarios,indirectos:p.otrosIndirectos,proc,
+    mpBase,factor,mpAjust,total,totalARS:total*tc};
+}
+
+/* ---- PET LÁMINA ---- */
+function petProc(){
+  const p=S.pet.params, tc=TC();
+  const energia=p.energia;
+  const MO=(p.valorHora*p.operarios*p.cargas)/p.prodHora/tc;
+  const cono=((p.conoARSkg*p.conoKgBobina)/p.kgBobinaProd)/tc;
+  const pallet=(p.palletARS/p.palletCap)/tc;
+  const stretch=(cono+pallet)*p.stretchPct;
+  const flete=(p.fletePallet*p.pctFlete/p.palletCap)/tc;
+  const otros=p.otrosVarios, indirectos=p.otrosIndirectos;
+  const totalCFlete=energia+MO+cono+pallet+stretch+flete+otros+indirectos;
+  return {energia,MO,cono,pallet,stretch,flete,otros,indirectos,totalCFlete,totalSFlete:totalCFlete-flete};
+}
+function petVariantes(){
+  const p=S.pet.params, proc=petProc(), tc=TC();
+  const u=S.pet.insumos.map(i=>i.usd);
+  const factor=1/(1-(p.merma-p.recuperacion));
+  return S.pet.variantes.map(v=>{
+    let mpBase=0; v.r.forEach((x,i)=>mpBase+=x*(u[i]||0));
+    const mpAjust=mpBase*factor;
+    return {nom:v.nom,mpBase,mpAjust,procC:proc.totalCFlete,procS:proc.totalSFlete,
+      cFlete:mpAjust+proc.totalCFlete, sFlete:mpAjust+proc.totalSFlete, arsC:(mpAjust+proc.totalCFlete)*tc};
+  });
+}
+function petClientRow(c,variantes){
+  const n=S.pet.net, vr=variantes[c.v]||variantes[0];
+  const costo=vr.cFlete, precio=c.act;
+  const bruta=precio-costo, margenBruto=precio?bruta/precio:0;
+  const gastos=precio*(n.admin+n.iibb+n.dyc+n.financiero);
+  const gan=Math.max(0,(precio-costo-gastos)*n.ganancias);
+  const netoUSD=precio-costo-gastos-gan, margenNeto=precio?netoUSD/precio:0;
+  const aumento=c.ant?(c.act-c.ant)/c.ant:0;
+  return {...c,variante:vr.nom,costo,precio,bruta,margenBruto,gastos,gan,netoUSD,margenNeto,aumento};
+}
+
+/* ---- LAMINADO PET/PE ---- */
+function petpeProc(){
+  const p=S.petpe.params, tc=TC();
+  const adhes=S.petpe.adhesivos.reduce((a,x)=>a+x.usd*x.pct,0);
+  const MOlam=(p.salLam*p.opLam*p.cargasLam)/p.prodLam/tc;
+  const enerLam=(p.motoresLam*p.consumoLam*p.usdkwhLam)/p.prodLam;
+  const subLam=adhes+MOlam+enerLam;
+  const MOref=(p.salRef*p.opRef*p.cargasRef)/p.prodRef/tc;
+  const enerRef=(p.motoresRef*p.consumoRef*p.usdkwhRef)/p.prodRef;
+  const subRef=MOref+enerRef+p.otrosRef;
+  return {adhes,MOlam,enerLam,subLam,MOref,enerRef,otrosRef:p.otrosRef,subRef,procKg:subLam+subRef};
+}
+function petpeCostPET(){ const p=S.petpe.params; if(p.linkPET){ const v=petVariantes()[0]; return v.cFlete; } return p.costoLaminaPET; }
+function petpeCostPE(){ const p=S.petpe.params; if(p.linkPE){ return calcPE().total; } return p.costoLaminaPE; }
+function petpeRow(pr){
+  const p=S.petpe.params, n=S.petpe.net, proc=petpeProc(), tc=TC();
+  const cPETkg=petpeCostPET(), cPEkg=petpeCostPE();
+  const yPET=(pr.aFin*pr.tiras)/pr.aPET, yPE=(pr.aFin*pr.tiras)/pr.aPE;
+  const gPET=pr.ePET*p.densPET, gPE=pr.ePE*p.densPE, gTot=gPET+gPE;
+  const pPET=gPET/gTot, pPE=gPE/gTot;
+  const kgPET=pPET/yPET, kgPE=pPE/yPE, kgTot=kgPET+kgPE;
+  const cPET=kgPET*cPETkg, cPE=kgPE*cPEkg, cProc=kgTot*proc.procKg;
+  const costo=cPET+cPE+cProc, precio=pr.precio;
+  const margenBruto=precio?(precio-costo)/precio:0;
+  const gastos=precio*(n.admin+n.iibb+n.dyc+n.financiero);
+  const preGan=precio-costo-gastos;
+  const gan=Math.max(0,preGan*n.ganancias);
+  const netoUSD=preGan-gan, margenNeto=precio?netoUSD/precio:0;
+  return {...pr,yPET,yPE,gPET,gPE,pPET,pPE,kgPET,kgPE,kgTot,cPET,cPE,cProc,costo,
+    margenBruto,gastos,preGan,gan,netoUSD,margenNeto};
+}
+
+/* ---- BANDEJAS ---- */
+function bandejaCost(prod){
+  const p=S.bandejas.params, tc=TC();
+  const MOh=p.salario*p.operarios*(1+p.cargas);
+  const desp=prod.bruto-prod.neto;
+  const mpUtil=(prod.neto+desp*(1-p.recuperacion))/1000;
+  const precioMP=prod.mat==='Negro'?p.mpNegro:p.mpCristal;
+  const cMP=mpUtil*precioMP, cMO=(MOh/prod.vel)/tc, cEner=mpUtil*p.energia, cOtros=mpUtil*prod.otros;
+  const totalU=cMP+cMO+cEner+cOtros;
+  return {desp,mpUtil,cMP,cMO,cEner,cOtros,totalU,usdMillar:totalU*1000};
+}
+function bandejaCostByCod(cod){ const pr=S.bandejas.productos.find(x=>x.cod===cod); return pr?bandejaCost(pr).usdMillar:0; }
+
+/* ============================================================
+   PATH ENGINE + RENDER PLUMBING
+   ============================================================ */
+function getPath(p){ return p.split('.').reduce((o,k)=>o?.[/^\d+$/.test(k)?+k:k], S); }
+function setPath(p,val){ const ks=p.split('.'); let o=S;
+  for(let i=0;i<ks.length-1;i++){ const k=/^\d+$/.test(ks[i])?+ks[i]:ks[i]; o=o[k]; }
+  const last=ks[ks.length-1]; o[/^\d+$/.test(last)?+last:last]=val; }
+
+let activeTab='dash';
+function renderActive(){
+  ({dash:renderDash,pet:renderPET,pe:renderPE,petpe:renderPETPE,bandejas:renderBandejas}[activeTab])();
+}
+function renderAll(){ renderTCBar(); renderActive(); }
+
+document.addEventListener('change',e=>{
+  const t=e.target.closest('[data-path]'); if(!t)return;
+  let v=t.value;
+  if(t.dataset.type==='num') v=num(v);
+  if(t.dataset.type==='pctnum') v=num(v)/100;
+  setPath(t.dataset.path, v);
+  if(t.dataset.stamp){ const stp=t.dataset.stamp; setPath(stp,today()); }
+  commit(); renderActive();
+  if(activeTab!=='dash'){} // dash KPIs refresh when visited
+});
+
+/* number input cell */
+function nInp(path,val,{type='num',cls='',w='',step='any',edited=false}={}){
+  return `<input class="tinp ${cls} ${edited?'edited':''}" style="${w?`max-width:${w}px;`:''}" type="number" step="${step}"
+    data-path="${path}" data-type="${type}" value="${val}">`;
+}
+function field(path,val,label,{type='num',unit='',sub='',step='any',options=null}={}){
+  let input;
+  if(options){ input=`<select data-path="${path}">${options.map(o=>`<option value="${o.v}" ${o.v==val?'selected':''}>${o.t}</option>`).join('')}</select>`; }
+  else input=`<input type="number" step="${step}" data-path="${path}" data-type="${type}" value="${val}">`;
+  return `<div class="field"><label>${label}${sub?`<small>${sub}</small>`:''}</label>
+    <div class="iw">${input}${unit?`<span class="unit">${unit}</span>`:''}</div></div>`;
+}
+function breakdownBar(parts){ // parts: [{label,val,color}]
+  const tot=parts.reduce((a,p)=>a+Math.max(0,p.val),0)||1;
+  const bars=parts.map(p=>`<span style="width:${Math.max(0,p.val)/tot*100}%;background:${p.color}"></span>`).join('');
+  const leg=parts.map(p=>`<span><i style="background:${p.color}"></i>${p.label} <b class="mono">${pct(p.val/tot,0)}</b></span>`).join('');
+  return `<div class="bd">${bars}</div><div class="bd-leg">${leg}</div>`;
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+function moduleSummary(){
+  const vr=petVariantes();
+  const petC=S.pet.clientes.map(c=>petClientRow(c,vr));
+  const petAvg=petC.reduce((a,c)=>a+c.margenNeto,0)/(petC.length||1);
+  const petMin=petC.reduce((m,c)=>c.margenNeto<m.margenNeto?c:m,petC[0]||{margenNeto:0});
+
+  const ppRows=S.petpe.productos.map(petpeRow);
+  const ppAvg=ppRows.reduce((a,r)=>a+r.margenNeto,0)/(ppRows.length||1);
+  const ppMin=ppRows.reduce((m,r)=>r.margenNeto<m.margenNeto?r:m,ppRows[0]||{margenNeto:0});
+
+  const peTot=calcPE().total;
+
+  // bandejas: margen bruto sobre precio
+  const bp=S.bandejas.params; const bRows=[];
+  S.bandejas.ensaladeras.forEach(e=>{ Object.entries(e.p).forEach(([cod,val])=>{
+    const precio=e.mon==='USD'?val:val/TC(); const costo=bandejaCostByCod(cod);
+    bRows.push({cli:e.cli,cod,precio,costo,m:precio?(precio-costo)/precio:0}); }); });
+  Object.entries(S.bandejas.clamshells).forEach(([cod,val])=>{ const costo=bandejaCostByCod(cod);
+    bRows.push({cli:'Lista clamshells',cod,precio:val,costo,m:val?(val-costo)/val:0}); });
+  const bAvg=bRows.reduce((a,r)=>a+r.m,0)/(bRows.length||1);
+  const bMin=bRows.reduce((m,r)=>r.m<m.m?r:m,bRows[0]||{m:0});
+
+  return {petC,petAvg,petMin,ppRows,ppAvg,ppMin,peTot,bRows,bAvg,bMin};
+}
+function renderDash(){
+  const d=moduleSummary();
+  const alerts=[];
+  d.petC.forEach(c=>{ const s=semaforo(c.margenNeto); if(s!=='v') alerts.push({mod:'PET',item:`${c.cli} · ${c.variante}`,m:c.margenNeto,s}); });
+  d.ppRows.forEach(r=>{ const s=semaforo(r.margenNeto); if(s!=='v') alerts.push({mod:'PET/PE',item:`${r.cli} · ${r.med}`,m:r.margenNeto,s}); });
+  d.bRows.forEach(r=>{ const s=semaforo(r.m,S.bandejas.params.semVerde,S.bandejas.params.semAmarillo); if(s!=='v') alerts.push({mod:'Bandejas',item:`${r.cli} · ${r.cod}`,m:r.m,s}); });
+  alerts.sort((a,b)=>a.m-b.m);
+
+  const p=$('#page-dash');
+  p.innerHTML=`
+  <div class="section-head"><div><h2>Resumen ejecutivo</h2>
+    <div class="sub">Costos y márgenes vigentes · TC ${ars(TC())} · actualizado ${new Date(S.meta.updated).toLocaleString('es-AR')}</div></div>
+    <div class="sh-spacer"></div>
+    <button class="btn" id="dExportAll">⬇ Excel consolidado</button>
+    <button class="btn primary" id="dSnap">🕘 Guardar versión</button>
+  </div>
+
+  <div class="grid g4" style="margin-bottom:16px">
+    <div class="card stat accent"><div class="k">Margen neto PET</div><div class="v">${pct(d.petAvg,1)}</div><div class="d">${d.petC.length} clientes · prom.</div></div>
+    <div class="card stat"><div class="k">Margen neto Laminado</div><div class="v">${pct(d.ppAvg,1)}</div><div class="d">${d.ppRows.length} productos · prom.</div></div>
+    <div class="card stat"><div class="k">Margen bruto Bandejas</div><div class="v">${pct(d.bAvg,1)}</div><div class="d">${d.bRows.length} ítems · prom.</div></div>
+    <div class="card stat"><div class="k">Costo Film PE</div><div class="v">${usd(d.peTot,2)}<small>/kg</small></div><div class="d">insumo interno · ${ars(d.peTot*TC())}/kg</div></div>
+  </div>
+
+  <div class="grid g2">
+    <div class="card">
+      <div class="card-h"><h3>⚠️ Alertas de margen</h3><span class="tag">${alerts.length} ítem(s) bajo umbral verde</span></div>
+      <div class="card-b">${alerts.length?`<div class="tbl-wrap"><table><thead><tr><th>Módulo</th><th>Ítem</th><th>Margen</th><th>Estado</th></tr></thead><tbody>
+        ${alerts.slice(0,12).map(a=>`<tr><td><span class="chip">${a.mod}</span></td><td>${a.item}</td><td class="num">${pct(a.m,1)}</td><td><span class="pill ${a.s}">${semLabel(a.s)}</span></td></tr>`).join('')}
+        </tbody></table></div>${alerts.length>12?`<div class="note" style="margin-top:8px">+${alerts.length-12} más…</div>`:''}`
+        :`<div class="empty">✅ Todos los ítems en verde</div>`}</div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Comparativa por módulo</h3></div>
+      <div class="card-b">
+        <div class="tbl-wrap"><table><thead><tr><th>Módulo</th><th>Ítems</th><th>Margen prom.</th><th>Peor margen</th></tr></thead><tbody>
+          <tr><td><span class="chip teal">PET Lámina</span></td><td class="num">${d.petC.length}</td><td class="num">${pct(d.petAvg,1)}</td><td>${d.petMin.cli||'-'} <span class="num">(${pct(d.petMin.margenNeto||0,1)})</span></td></tr>
+          <tr><td><span class="chip teal">Laminado PET/PE</span></td><td class="num">${d.ppRows.length}</td><td class="num">${pct(d.ppAvg,1)}</td><td>${d.ppMin.cli||'-'} <span class="num">(${pct(d.ppMin.margenNeto||0,1)})</span></td></tr>
+          <tr><td><span class="chip teal">Bandejas</span></td><td class="num">${d.bRows.length}</td><td class="num">${pct(d.bAvg,1)}</td><td>${d.bMin.cli||'-'} ${d.bMin.cod||''} <span class="num">(${pct(d.bMin.m||0,1)})</span></td></tr>
+        </tbody></table></div>
+        <div class="note" style="margin-top:12px">PET y Laminado muestran <b>margen neto</b> (descontando gastos + Ganancias 35%). Bandejas muestra <b>margen bruto</b> sobre precio (sin gastos comerciales), con umbral verde ≥${pct(S.bandejas.params.semVerde,0)}.</div>
+      </div>
+    </div>
+  </div>`;
+  $('#dSnap').onclick=()=>openSnapshot();
+  $('#dExportAll').onclick=()=>exportConsolidado();
+}
+
+/* ============================================================
+   MÓDULO PET LÁMINA
+   ============================================================ */
+let petSearch='';
+function renderPET(){
+  const vr=petVariantes();
+  const rows=S.pet.clientes.map((c,i)=>({...petClientRow(c,vr),i}));
+  const filt=rows.filter(r=>!petSearch||r.cli.toLowerCase().includes(petSearch.toLowerCase()));
+  const avgNeto=rows.reduce((a,r)=>a+r.margenNeto,0)/(rows.length||1);
+  const avgBruto=rows.reduce((a,r)=>a+r.margenBruto,0)/(rows.length||1);
+  const opts=S.pet.variantes.map((v,i)=>({v:i,t:v.nom}));
+  const n=S.pet.net, p=S.pet.params, proc=petProc();
+
+  $('#page-pet').innerHTML=`
+  <div class="section-head"><div><h2>PET Lámina</h2><div class="sub">7 variantes de rPET/PET virgen · ${rows.length} clientes</div></div>
+    <div class="sh-spacer"></div>
+    <button class="btn" id="petSim">📊 Simulador</button>
+    <button class="btn" id="petExport">⬇ Excel</button>
+  </div>
+
+  <div class="grid g4" style="margin-bottom:16px">
+    <div class="card stat accent"><div class="k">Margen neto prom.</div><div class="v">${pct(avgNeto,1)}</div><div class="d">después de gastos + Ganancias</div></div>
+    <div class="card stat"><div class="k">Margen bruto prom.</div><div class="v">${pct(avgBruto,1)}</div><div class="d">precio − costo</div></div>
+    <div class="card stat"><div class="k">Costo procesamiento</div><div class="v">${usd(proc.totalCFlete,3)}<small>/kg</small></div><div class="d">c/flete · ${usd(proc.totalSFlete,3)} s/flete</div></div>
+    <div class="card stat"><div class="k">Precio prom.</div><div class="v">${usd(rows.reduce((a,r)=>a+r.precio,0)/(rows.length||1),2)}<small>/kg</small></div><div class="d">lista vigente</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><h3>Costo por variante</h3><span class="tag">USD/kg · merma ${pct(p.merma-p.recuperacion,0)} neta</span></div>
+    <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+      <th>Variante</th><th>MP base</th><th>MP ajust.</th><th>Proc. c/flete</th><th>Total c/flete</th><th>Total s/flete</th><th>ARS/kg</th></tr></thead><tbody>
+      ${vr.map(v=>`<tr><td>${v.nom}</td><td class="num">${usd(v.mpBase,3)}</td><td class="num">${usd(v.mpAjust,3)}</td>
+        <td class="num">${usd(v.procC,3)}</td><td class="num"><b>${usd(v.cFlete,3)}</b></td><td class="num">${usd(v.sFlete,3)}</td><td class="num">${ars(v.arsC)}</td></tr>`).join('')}
+    </tbody></table></div></div>
+  </div>
+
+  <div class="grid g2" style="margin-bottom:16px">
+    <div class="card">
+      <div class="card-h"><h3>Insumos / Materias primas</h3><span class="tag">editá USD/kg</span></div>
+      <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Cód</th><th>Descripción</th><th>USD/kg</th><th>ARS/kg</th></tr></thead><tbody>
+        ${S.pet.insumos.map((m,i)=>`<tr><td><span class="chip">${m.cod}</span></td><td style="white-space:normal">${m.desc}<br><span class="note">${m.tipo}</span></td>
+          <td>${nInp(`pet.insumos.${i}.usd`,m.usd,{w:80})}</td><td class="num">${ars(m.usd*TC())}</td></tr>`).join('')}
+      </tbody></table></div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Parámetros del cálculo neto</h3></div>
+      <div class="card-b"><div class="params-grid">
+        ${field('pet.net.admin',(n.admin*100),'Admin no cargado','%',{type:'pctnum',unit:'%',sub:'Oficina, contabilidad, sistemas'})}
+        ${field('pet.net.iibb',(n.iibb*100),'IIBB s/ventas',{type:'pctnum',unit:'%'})}
+        ${field('pet.net.dyc',(n.dyc*100),'Déb. y Créd. + otros',{type:'pctnum',unit:'%'})}
+        ${field('pet.net.financiero',(n.financiero*100),'Gastos financieros',{type:'pctnum',unit:'%'})}
+        ${field('pet.net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%'})}
+      </div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><h3>Lista de precios por cliente</h3>
+      <input class="search" id="petSearchI" placeholder="Buscar cliente…" value="${petSearch}" style="margin-left:auto">
+      <button class="btn sm primary" id="petAdd" style="margin-left:8px">+ Cliente</button></div>
+    <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+      <th>Cliente</th><th>Variante</th><th>P. ant.</th><th>P. act.</th><th>Aum.</th><th>Costo</th><th>M.Bruto</th><th>M.Neto USD</th><th>M.Neto%</th><th>Estado</th><th></th></tr></thead><tbody>
+      ${filt.map(r=>{ const s=semaforo(r.margenNeto); const ar=r.aumento;
+        return `<tr>
+        <td><input class="tinp" style="max-width:130px;text-align:left;font-family:'IBM Plex Sans'" data-path="pet.clientes.${r.i}.cli" value="${r.cli}"></td>
+        <td><select class="tsel" data-path="pet.clientes.${r.i}.v">${opts.map(o=>`<option value="${o.v}" ${o.v==r.v?'selected':''}>${o.t}</option>`).join('')}</select></td>
+        <td>${nInp(`pet.clientes.${r.i}.ant`,r.ant,{w:64})}</td>
+        <td>${nInp(`pet.clientes.${r.i}.act`,r.act,{w:64})}</td>
+        <td class="num delta ${ar>0.0001?'up':ar<-0.0001?'down':'flat'}">${ar>0?'+':''}${pct(ar,1)}</td>
+        <td class="num">${usd(r.costo,2)}</td>
+        <td class="num">${pct(r.margenBruto,1)}</td>
+        <td class="num">${usd(r.netoUSD,2)}</td>
+        <td class="num"><b>${pct(r.margenNeto,1)}</b></td>
+        <td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td>
+        <td class="row-actions"><button class="mini-x" data-del-pet="${r.i}">✕</button></td></tr>`;}).join('')}
+    </tbody>
+    <tr class="total"><td>PROMEDIO</td><td></td><td></td><td class="num">${usd(rows.reduce((a,r)=>a+r.act,0)/(rows.length||1),2)}</td><td></td>
+      <td class="num">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}</td><td class="num">${pct(avgBruto,1)}</td><td></td><td class="num">${pct(avgNeto,1)}</td><td></td><td></td></tr>
+    </table></div></div>
+  </div>`;
+
+  $('#petSearchI').oninput=e=>{petSearch=e.target.value; const w=$('#petSearchI');};
+  $('#petSearchI').onchange=e=>{petSearch=e.target.value;renderPET();};
+  $('#petAdd').onclick=()=>{ S.pet.clientes.push({cli:'Nuevo cliente',v:0,ant:0,act:0}); commit(); renderPET(); };
+  $('#petExport').onclick=exportPET;
+  $('#petSim').onclick=openPetSim;
+  $$('#page-pet [data-del-pet]').forEach(b=>b.onclick=()=>{ S.pet.clientes.splice(+b.dataset.delPet,1); commit(); renderPET(); });
+}
+
+/* ============================================================
+   MÓDULO FILM PE
+   ============================================================ */
+function renderPE(){
+  const c=calcPE(), p=S.pe.params;
+  const insOpts=S.pe.insumos.map(i=>({v:i.cod,t:i.cod+' · '+i.desc}));
+  const sumMix=S.pe.receta.reduce((a,r)=>a+r.p,0);
+  const parts=[
+    {label:'Materia prima',val:c.mpAjust,color:'var(--amber)'},
+    {label:'Mano de obra',val:c.MO,color:'var(--teal)'},
+    {label:'Energía',val:c.energia,color:'var(--blue)'},
+    {label:'Otros + indirectos',val:c.otros+c.indirectos,color:'var(--muted)'}
+  ];
+  $('#page-pe').innerHTML=`
+  <div class="section-head"><div><h2>Film PE</h2><div class="sub">Film de polietileno para laminado PET/PE · insumo interno (no se vende)</div></div>
+    <div class="sh-spacer"></div>
+    <button class="btn" id="peSim">📊 Simulador</button>
+    <button class="btn" id="peExport">⬇ Excel</button>
+  </div>
+  <div class="banner info">ℹ️ Este film es un insumo de la laminadora; su costo total entra como precio del PE en el módulo Laminado PET/PE.</div>
+
+  <div class="grid g4" style="margin-bottom:16px">
+    <div class="card stat accent"><div class="k">Costo total</div><div class="v">${usd(c.total,2)}<small>/kg</small></div><div class="d">${ars(c.totalARS)}/kg</div></div>
+    <div class="card stat"><div class="k">MP ajustada</div><div class="v">${usd(c.mpAjust,2)}<small>/kg</small></div><div class="d">base ${usd(c.mpBase,2)} × merma ${c.factor.toFixed(3)}</div></div>
+    <div class="card stat"><div class="k">Procesamiento</div><div class="v">${usd(c.proc,3)}<small>/kg</small></div><div class="d">MO + energía + otros</div></div>
+    <div class="card stat"><div class="k">Capacidad línea</div><div class="v">${p.prodHora}<small> kg/h</small></div><div class="d">${p.operarios} operarios/turno</div></div>
+  </div>
+
+  <div class="grid g2" style="margin-bottom:16px">
+    <div class="card">
+      <div class="card-h"><h3>Composición del costo</h3></div>
+      <div class="card-b">${breakdownBar(parts)}
+        <div class="tbl-wrap" style="margin-top:14px"><table><tbody>
+          <tr><td>Materia prima (ajust. merma)</td><td class="num">${usd(c.mpAjust,3)}</td><td class="num">${ars(c.mpAjust*TC())}</td></tr>
+          <tr><td>Mano de obra</td><td class="num">${usd(c.MO,3)}</td><td class="num">${ars(c.MO*TC())}</td></tr>
+          <tr><td>Energía</td><td class="num">${usd(c.energia,3)}</td><td class="num">${ars(c.energia*TC())}</td></tr>
+          <tr><td>Otros + indirectos</td><td class="num">${usd(c.otros+c.indirectos,3)}</td><td class="num">${ars((c.otros+c.indirectos)*TC())}</td></tr>
+          <tr class="total"><td>TOTAL</td><td class="num">${usd(c.total,3)}</td><td class="num">${ars(c.totalARS)}</td></tr>
+        </tbody></table></div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Receta de mezcla</h3><span class="tag" style="color:${Math.abs(sumMix-1)<0.001?'var(--green)':'var(--red)'}">suma ${pct(sumMix,0)}</span></div>
+      <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Insumo</th><th>% mezcla</th><th>USD/kg</th><th>Aporte</th></tr></thead><tbody>
+        ${S.pe.receta.map((r,i)=>{ const ins=S.pe.insumos.find(x=>x.cod===r.cod)||{};
+          return `<tr><td><select class="tsel" data-path="pe.receta.${i}.cod">${insOpts.map(o=>`<option value="${o.v}" ${o.v===r.cod?'selected':''}>${o.t}</option>`).join('')}</select></td>
+          <td>${nInp(`pe.receta.${i}.p`,r.p,{w:60})}</td><td class="num">${usd(ins.usd||0,2)}</td><td class="num">${usd(r.p*(ins.usd||0),3)}</td></tr>`;}).join('')}
+      </tbody></table></div>
+      <div class="note" style="margin-top:8px">El % de mezcla debe sumar 100%. Merma del proceso: ${pct(p.merma,0)}.</div></div>
+    </div>
+  </div>
+
+  <div class="grid g2" style="margin-bottom:16px">
+    <div class="card">
+      <div class="card-h"><h3>Catálogo de insumos PE</h3><span class="tag">editá USD/kg</span></div>
+      <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Cód</th><th>Descripción</th><th>Prov.</th><th>USD/kg</th><th>ARS/kg</th><th>Act.</th></tr></thead><tbody>
+        ${S.pe.insumos.map((m,i)=>`<tr><td><span class="chip">${m.cod}</span></td><td style="white-space:normal">${m.desc}</td><td>${m.prov}</td>
+          <td>${nInp(`pe.insumos.${i}.usd`,m.usd,{w:70})}</td><td class="num">${ars(m.usd*TC())}</td>
+          <td><input class="tinp" style="max-width:96px;text-align:left;font-family:'IBM Plex Sans'" data-path="pe.insumos.${i}.upd" value="${m.upd}"></td></tr>`).join('')}
+      </tbody></table></div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Parámetros</h3></div>
+      <div class="card-b"><div class="params-grid">
+        ${field('pe.params.valorHora',p.valorHora,'Valor hora MO',{unit:'ARS/h'})}
+        ${field('pe.params.cargas',p.cargas,'Cargas sociales',{unit:'×'})}
+        ${field('pe.params.operarios',p.operarios,'Operarios/turno',{unit:'pers'})}
+        ${field('pe.params.prodHora',p.prodHora,'Producción',{unit:'kg/h'})}
+        ${field('pe.params.motores',p.motores,'Motores',{unit:'u'})}
+        ${field('pe.params.consumoMotor',p.consumoMotor,'Consumo/motor',{unit:'kW/h'})}
+        ${field('pe.params.usdkwh',p.usdkwh,'Costo energía',{unit:'USD/kWh'})}
+        ${field('pe.params.merma',(p.merma*100),'Merma proceso',{type:'pctnum',unit:'%'})}
+        ${field('pe.params.otrosVarios',p.otrosVarios,'Otros varios',{unit:'USD/kg'})}
+        ${field('pe.params.otrosIndirectos',p.otrosIndirectos,'Otros indirectos',{unit:'USD/kg'})}
+      </div></div>
+    </div>
+  </div>`;
+  $('#peExport').onclick=exportPE;
+  $('#peSim').onclick=openPeSim;
+}
+
+/* ============================================================
+   MÓDULO LAMINADO PET/PE
+   ============================================================ */
+function renderPETPE(){
+  const proc=petpeProc(), p=S.petpe.params, n=S.petpe.net;
+  const rows=S.petpe.productos.map((pr,i)=>({...petpeRow(pr),i}));
+  const avgNeto=rows.reduce((a,r)=>a+r.margenNeto,0)/(rows.length||1);
+  const avgBruto=rows.reduce((a,r)=>a+r.margenBruto,0)/(rows.length||1);
+  const cPET=petpeCostPET(), cPE=petpeCostPE();
+
+  $('#page-petpe').innerHTML=`
+  <div class="section-head"><div><h2>Laminado PET/PE</h2><div class="sub">Lámina rPET + film PE laminados y refilados · ${rows.length} productos</div></div>
+    <div class="sh-spacer"></div>
+    <button class="btn" id="ppSim">📊 Simulador</button>
+    <button class="btn" id="ppExport">⬇ Excel</button>
+  </div>
+
+  <div class="grid g4" style="margin-bottom:16px">
+    <div class="card stat accent"><div class="k">Margen neto prom.</div><div class="v">${pct(avgNeto,1)}</div><div class="d">${rows.length} productos</div></div>
+    <div class="card stat"><div class="k">Margen bruto prom.</div><div class="v">${pct(avgBruto,1)}</div></div>
+    <div class="card stat"><div class="k">Costo proceso</div><div class="v">${usd(proc.procKg,3)}<small>/kg</small></div><div class="d">laminado ${usd(proc.subLam,3)} + refilado ${usd(proc.subRef,3)}</div></div>
+    <div class="card stat"><div class="k">Insumos lámina</div><div class="v" style="font-size:18px">PET ${usd(cPET,2)}<br>PE ${usd(cPE,2)}</div><div class="d">USD/kg</div></div>
+  </div>
+
+  <div class="grid g2" style="margin-bottom:16px">
+    <div class="card">
+      <div class="card-h"><h3>Costo del proceso (laminado + refilado)</h3></div>
+      <div class="card-b"><div class="tbl-wrap"><table><tbody>
+        <tr><td>Adhesivos + diluyente</td><td class="num">${usd(proc.adhes,4)}</td></tr>
+        <tr><td>MO laminado</td><td class="num">${usd(proc.MOlam,4)}</td></tr>
+        <tr><td>Energía laminado</td><td class="num">${usd(proc.enerLam,4)}</td></tr>
+        <tr><td>MO refilado</td><td class="num">${usd(proc.MOref,4)}</td></tr>
+        <tr><td>Energía refilado</td><td class="num">${usd(proc.enerRef,4)}</td></tr>
+        <tr><td>Otros refilado</td><td class="num">${usd(proc.otrosRef,4)}</td></tr>
+        <tr class="total"><td>Total por kg que pasa por la línea</td><td class="num">${usd(proc.procKg,4)}</td></tr>
+      </tbody></table></div>
+      <div class="note" style="margin-top:8px">Se aplica sobre los <b>kg brutos</b> (PET+PE que entran), no sobre el kg final.</div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Insumos lámina &amp; adhesivos</h3></div>
+      <div class="card-b">
+        <div class="params-grid" style="grid-template-columns:1fr 1fr">
+          ${field('petpe.params.costoLaminaPET',p.costoLaminaPET,'Costo lámina rPET',{unit:'USD/kg',sub:'con flete Lanús→Chivilcoy'})}
+          ${field('petpe.params.costoLaminaPE',p.costoLaminaPE,'Costo lámina PE',{unit:'USD/kg'})}
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);margin:2px 0 6px">
+          <input type="checkbox" data-link="linkPET" ${p.linkPET?'checked':''}> Vincular costo rPET al módulo PET (rPET Cristal c/flete = ${usd(petVariantes()[0].cFlete,3)})</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);margin-bottom:10px">
+          <input type="checkbox" data-link="linkPE" ${p.linkPE?'checked':''}> Vincular costo PE al módulo Film PE (= ${usd(calcPE().total,3)})</label>
+        <div class="tbl-wrap"><table><thead><tr><th>Adhesivo</th><th>USD/kg</th><th>% aplic.</th><th>Aporte</th></tr></thead><tbody>
+          ${S.petpe.adhesivos.map((a,i)=>`<tr><td style="white-space:normal">${a.nom}</td><td>${nInp(`petpe.adhesivos.${i}.usd`,a.usd,{w:60})}</td>
+            <td>${nInp(`petpe.adhesivos.${i}.pct`,a.pct,{w:64})}</td><td class="num">${usd(a.usd*a.pct,4)}</td></tr>`).join('')}
+        </tbody></table></div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><h3>Productos / clientes</h3><button class="btn sm primary" id="ppAdd" style="margin-left:auto">+ Producto</button></div>
+    <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+      <th>Cliente</th><th>Medida</th><th>Esp.PET</th><th>Esp.PE</th><th>Tiras</th><th>Yield PET</th><th>Costo</th><th>Precio</th><th>M.Bruto</th><th>M.Neto USD</th><th>M.Neto%</th><th>Estado</th><th></th></tr></thead><tbody>
+      ${rows.map(r=>{ const s=semaforo(r.margenNeto);
+        return `<tr>
+        <td><input class="tinp" style="max-width:120px;text-align:left;font-family:'IBM Plex Sans'" data-path="petpe.productos.${r.i}.cli" value="${r.cli}"></td>
+        <td><input class="tinp" style="max-width:78px;text-align:left;font-family:'IBM Plex Mono'" data-path="petpe.productos.${r.i}.med" value="${r.med}"></td>
+        <td>${nInp(`petpe.productos.${r.i}.ePET`,r.ePET,{w:54})}</td>
+        <td>${nInp(`petpe.productos.${r.i}.ePE`,r.ePE,{w:54})}</td>
+        <td>${nInp(`petpe.productos.${r.i}.tiras`,r.tiras,{w:42})}</td>
+        <td class="num">${pct(r.yPET,0)}</td>
+        <td class="num">${usd(r.costo,2)}</td>
+        <td>${nInp(`petpe.productos.${r.i}.precio`,r.precio,{w:60})}</td>
+        <td class="num">${pct(r.margenBruto,1)}</td>
+        <td class="num">${usd(r.netoUSD,2)}</td>
+        <td class="num"><b>${pct(r.margenNeto,1)}</b></td>
+        <td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td>
+        <td class="row-actions"><button class="mini-x" data-del-pp="${r.i}">✕</button></td></tr>`;}).join('')}
+    </tbody>
+    <tr class="total"><td>PROMEDIO</td><td></td><td></td><td></td><td></td><td></td>
+      <td class="num">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}</td>
+      <td class="num">${usd(rows.reduce((a,r)=>a+r.precio,0)/(rows.length||1),2)}</td>
+      <td class="num">${pct(avgBruto,1)}</td><td></td><td class="num">${pct(avgNeto,1)}</td><td></td><td></td></tr>
+    </table></div>
+    <div class="note" style="margin-top:8px">Las columnas de ancho de bobina y ancho final están en el detalle por producto (editá los anchos en el simulador o en el Excel). Acá editás espesores, tiras y precio.</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><h3>Parámetros del proceso</h3></div>
+    <div class="card-b"><div class="params-grid">
+      <div class="params-sub">Laminado</div>
+      ${field('petpe.params.salLam',p.salLam,'Salario operario',{unit:'ARS/h'})}
+      ${field('petpe.params.prodLam',p.prodLam,'Producción',{unit:'kg/h'})}
+      ${field('petpe.params.opLam',p.opLam,'Operarios',{unit:'pers'})}
+      ${field('petpe.params.motoresLam',p.motoresLam,'Motores',{unit:'u'})}
+      <div class="params-sub">Refilado</div>
+      ${field('petpe.params.salRef',p.salRef,'Salario operario',{unit:'ARS/h'})}
+      ${field('petpe.params.prodRef',p.prodRef,'Producción',{unit:'kg/h'})}
+      ${field('petpe.params.otrosRef',p.otrosRef,'Otros gastos',{unit:'USD/kg'})}
+      ${field('petpe.params.usdkwhLam',p.usdkwhLam,'Costo energía',{unit:'USD/kWh'})}
+      <div class="params-sub">Gastos sobre venta (margen neto)</div>
+      ${field('petpe.net.admin',(n.admin*100),'Admin',{type:'pctnum',unit:'%'})}
+      ${field('petpe.net.iibb',(n.iibb*100),'IIBB',{type:'pctnum',unit:'%'})}
+      ${field('petpe.net.dyc',(n.dyc*100),'DyC + otros',{type:'pctnum',unit:'%'})}
+      ${field('petpe.net.financiero',(n.financiero*100),'Financieros',{type:'pctnum',unit:'%'})}
+      ${field('petpe.net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%'})}
+    </div></div>
+  </div>`;
+  $('#ppAdd').onclick=()=>{ S.petpe.productos.push({cli:'Nuevo',med:'000x000',aPET:400,ePET:250,aPE:420,ePE:50,aFin:380,tiras:1,precio:3.5}); commit(); renderPETPE(); };
+  $('#ppExport').onclick=exportPETPE;
+  $('#ppSim').onclick=openPpSim;
+  $$('#page-petpe [data-del-pp]').forEach(b=>b.onclick=()=>{ S.petpe.productos.splice(+b.dataset.delPp,1); commit(); renderPETPE(); });
+  $$('#page-petpe [data-link]').forEach(c=>c.onchange=()=>{ S.petpe.params[c.dataset.link]=c.checked; commit(); renderPETPE(); });
+}
+
+/* ============================================================
+   MÓDULO BANDEJAS
+   ============================================================ */
+function renderBandejas(){
+  const p=S.bandejas.params;
+  const prods=S.bandejas.productos.map((pr,i)=>({...pr,...bandejaCost(pr),i}));
+  const ensCods=S.bandejas.productos.filter(x=>x.linea==='Ensaladera').map(x=>x.cod);
+  // ensaladeras rows
+  const ensRows=[];
+  S.bandejas.ensaladeras.forEach((e,ei)=>{ ensCods.forEach(cod=>{
+    const val=e.p[cod]; if(val==null)return;
+    const precio=e.mon==='USD'?val:val/TC(); const costo=bandejaCostByCod(cod);
+    const m=precio?(precio-costo)/precio:0;
+    ensRows.push({ei,cli:e.cli,mon:e.mon,cod,val,precio,costo,m}); }); });
+  const ensAvg=ensRows.reduce((a,r)=>a+r.m,0)/(ensRows.length||1);
+  const clamRows=Object.entries(S.bandejas.clamshells).map(([cod,val])=>{
+    const costo=bandejaCostByCod(cod); return {cod,val,costo,m:val?(val-costo)/val:0}; });
+  const clamAvg=clamRows.reduce((a,r)=>a+r.m,0)/(clamRows.length||1);
+
+  $('#page-bandejas').innerHTML=`
+  <div class="section-head"><div><h2>Bandejas</h2><div class="sub">Termoformado: ${prods.length} productos · ensaladeras + clamshells</div></div>
+    <div class="sh-spacer"></div>
+    <button class="btn" id="bSim">📊 Simulador</button>
+    <button class="btn" id="bExport">⬇ Excel</button>
+  </div>
+
+  <div class="grid g4" style="margin-bottom:16px">
+    <div class="card stat accent"><div class="k">Margen ensaladeras</div><div class="v">${pct(ensAvg,1)}</div><div class="d">prom. sobre precio</div></div>
+    <div class="card stat"><div class="k">Margen clamshells</div><div class="v">${pct(clamAvg,1)}</div><div class="d">lista única blueberry</div></div>
+    <div class="card stat"><div class="k">MP rPET interno</div><div class="v">${usd(p.mpCristal,2)}<small>/kg</small></div><div class="d">cristal · negro ${usd(p.mpNegro,2)}</div></div>
+    <div class="card stat"><div class="k">MO termoformado</div><div class="v">${ars(p.salario*p.operarios*(1+p.cargas))}<small>/h</small></div><div class="d">${p.operarios} op × ${pct(p.cargas,0)} cargas</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><h3>Costo por producto</h3><button class="btn sm primary" id="bAdd" style="margin-left:auto">+ Producto</button></div>
+    <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+      <th>Cód</th><th>Línea</th><th>Mat.</th><th>P.Bruto g</th><th>P.Neto g</th><th>Vel u/h</th><th>MP USD/u</th><th>MO USD/u</th><th>Otros</th><th>USD/millar</th><th></th></tr></thead><tbody>
+      ${prods.map(r=>`<tr>
+        <td><span class="chip teal">${r.cod}</span></td>
+        <td>${r.linea}</td>
+        <td><select class="tsel" data-path="bandejas.productos.${r.i}.mat"><option ${r.mat==='Cristal'?'selected':''}>Cristal</option><option ${r.mat==='Negro'?'selected':''}>Negro</option></select></td>
+        <td>${nInp(`bandejas.productos.${r.i}.bruto`,r.bruto,{w:60})}</td>
+        <td>${nInp(`bandejas.productos.${r.i}.neto`,r.neto,{w:60})}</td>
+        <td>${nInp(`bandejas.productos.${r.i}.vel`,r.vel,{w:64})}</td>
+        <td class="num">${usd(r.cMP,4)}</td>
+        <td class="num">${usd(r.cMO,4)}</td>
+        <td>${nInp(`bandejas.productos.${r.i}.otros`,r.otros,{w:54})}</td>
+        <td class="num"><b>${usd(r.usdMillar,2)}</b></td>
+        <td class="row-actions"><button class="mini-x" data-del-b="${r.i}">✕</button></td></tr>`).join('')}
+    </tbody></table></div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><h3>Ensaladeras · precios por cliente</h3><span class="tag">USD/millar · Bandex en USD, resto ARS</span></div>
+    <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+      <th>Cliente</th><th>Producto</th><th>Moneda</th><th>Precio orig.</th><th>USD/millar</th><th>Costo</th><th>Margen USD</th><th>Margen%</th><th>Estado</th></tr></thead><tbody>
+      ${ensRows.map(r=>{ const s=semaforo(r.m,p.semVerde,p.semAmarillo);
+        return `<tr><td>${r.cli}</td><td><span class="chip">${r.cod}</span></td>
+        <td><select class="tsel" data-path="bandejas.ensaladeras.${r.ei}.mon"><option ${r.mon==='USD'?'selected':''}>USD</option><option ${r.mon==='ARS'?'selected':''}>ARS</option></select></td>
+        <td>${nInp(`bandejas.ensaladeras.${r.ei}.p.${r.cod}`,r.val,{w:84})}</td>
+        <td class="num">${usd(r.precio,2)}</td><td class="num">${usd(r.costo,2)}</td>
+        <td class="num">${usd(r.precio-r.costo,2)}</td><td class="num"><b>${pct(r.m,1)}</b></td>
+        <td><span class="pill ${s}">${semLabel(s)}</span></td></tr>`;}).join('')}
+    </tbody></table></div></div>
+  </div>
+
+  <div class="grid g2" style="margin-bottom:16px">
+    <div class="card">
+      <div class="card-h"><h3>Clamshells · lista única</h3><span class="tag">USD/millar</span></div>
+      <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Precio</th><th>Costo</th><th>Margen USD</th><th>Margen%</th><th>Estado</th></tr></thead><tbody>
+        ${clamRows.map(r=>{ const s=semaforo(r.m,p.semVerde,p.semAmarillo);
+          return `<tr><td><span class="chip teal">${r.cod}</span></td><td>${nInp(`bandejas.clamshells.${r.cod}`,r.val,{w:64})}</td>
+          <td class="num">${usd(r.costo,2)}</td><td class="num">${usd(r.val-r.costo,2)}</td><td class="num"><b>${pct(r.m,1)}</b></td>
+          <td><span class="pill ${s}">${semLabel(s)}</span></td></tr>`;}).join('')}
+      </tbody></table></div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Parámetros</h3></div>
+      <div class="card-b"><div class="params-grid">
+        ${field('bandejas.params.mpCristal',p.mpCristal,'MP rPET Cristal',{unit:'USD/kg',sub:'costo interno de planta'})}
+        ${field('bandejas.params.mpNegro',p.mpNegro,'MP rPET Negro',{unit:'USD/kg'})}
+        ${field('bandejas.params.recuperacion',(p.recuperacion*100),'Recuperación scrap',{type:'pctnum',unit:'%'})}
+        ${field('bandejas.params.energia',p.energia,'Energía',{unit:'USD/kg'})}
+        ${field('bandejas.params.salario',p.salario,'Salario operario',{unit:'ARS/h'})}
+        ${field('bandejas.params.operarios',p.operarios,'Operarios',{unit:'pers'})}
+        ${field('bandejas.params.cargas',(p.cargas*100),'Cargas sociales',{type:'pctnum',unit:'%'})}
+        ${field('bandejas.params.semVerde',(p.semVerde*100),'Umbral verde',{type:'pctnum',unit:'%'})}
+        ${field('bandejas.params.semAmarillo',(p.semAmarillo*100),'Umbral amarillo',{type:'pctnum',unit:'%'})}
+      </div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><h3>Cartera blueberry (lista clamshells)</h3><span class="tag">${S.bandejas.blueberry.length} clientes</span></div>
+    <div class="card-b" style="display:flex;flex-wrap:wrap;gap:7px">
+      ${S.bandejas.blueberry.map(b=>`<span class="chip">${b}</span>`).join('')}
+    </div>
+  </div>`;
+  $('#bAdd').onclick=()=>{ S.bandejas.productos.push({cod:'NEW',linea:'Clamshell',mat:'Cristal',bruto:20,neto:16,vel:7000,otros:0.06}); commit(); renderBandejas(); };
+  $('#bExport').onclick=exportBandejas;
+  $('#bSim').onclick=openBandejasSim;
+  $$('#page-bandejas [data-del-b]').forEach(b=>b.onclick=()=>{ S.bandejas.productos.splice(+b.dataset.delB,1); commit(); renderBandejas(); });
+}
+
+/* ============================================================
+   MODAL + SIMULADORES
+   ============================================================ */
+function openModal(html){ $('#modal').innerHTML=html; $('#modalBg').classList.add('open'); }
+function closeModal(){ $('#modalBg').classList.remove('open'); }
+$('#modalBg').addEventListener('click',e=>{ if(e.target.id==='modalBg') closeModal(); });
+
+const MODS={
+  pe:{name:'Film PE',unit:'/kg',hasPrice:false},
+  pet:{name:'PET Lámina',unit:'/kg',hasPrice:true},
+  petpe:{name:'Laminado PET/PE',unit:'/kg',hasPrice:true},
+  bandejas:{name:'Bandejas',unit:'/millar',hasPrice:true}
+};
+function clone(o){ return JSON.parse(JSON.stringify(o)); }
+
+function summarize(mod){
+  if(mod==='pe'){ const c=calcPE().total; return {cost:c,margin:null,unit:'/kg'}; }
+  if(mod==='pet'){ const vr=petVariantes(); const rows=S.pet.clientes.map(c=>petClientRow(c,vr));
+    return {cost:rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1), margin:rows.reduce((a,r)=>a+r.margenNeto,0)/(rows.length||1), unit:'/kg'}; }
+  if(mod==='petpe'){ const rows=S.petpe.productos.map(petpeRow);
+    return {cost:rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1), margin:rows.reduce((a,r)=>a+r.margenNeto,0)/(rows.length||1), unit:'/kg'}; }
+  if(mod==='bandejas'){ const p=S.bandejas.params; const prods=S.bandejas.productos.map(bandejaCost);
+    const cost=prods.reduce((a,r)=>a+r.usdMillar,0)/(prods.length||1);
+    const ms=[]; S.bandejas.ensaladeras.forEach(e=>Object.entries(e.p).forEach(([cod,v])=>{const pr=e.mon==='USD'?v:v/TC();const co=bandejaCostByCod(cod);ms.push(pr?(pr-co)/pr:0);}));
+    Object.entries(S.bandejas.clamshells).forEach(([cod,v])=>{const co=bandejaCostByCod(cod);ms.push(v?(v-co)/v:0);});
+    return {cost,margin:ms.reduce((a,x)=>a+x,0)/(ms.length||1),unit:'/millar'}; }
+}
+function applyScenario(cl,mod,mpM,prM){
+  if(mod==='pe') cl.pe.insumos.forEach(i=>i.usd*=mpM);
+  if(mod==='pet'){ cl.pet.insumos.forEach(i=>i.usd*=mpM); cl.pet.clientes.forEach(c=>c.act*=prM); }
+  if(mod==='petpe'){ cl.petpe.params.costoLaminaPET*=mpM; cl.petpe.params.costoLaminaPE*=mpM; cl.petpe.productos.forEach(p=>p.precio*=prM); }
+  if(mod==='bandejas'){ cl.bandejas.params.mpCristal*=mpM; cl.bandejas.params.mpNegro*=mpM;
+    cl.bandejas.ensaladeras.forEach(e=>{for(const k in e.p)e.p[k]*=prM;}); for(const k in cl.bandejas.clamshells)cl.bandejas.clamshells[k]*=prM; }
+}
+function scenarioResult(mod,mpPct,prPct,tcVal){
+  const orig=S; const cl=clone(orig);
+  applyScenario(cl,mod,1+mpPct/100,1+prPct/100);
+  cl.tc.value=tcVal;
+  S=cl; const scen=summarize(mod); S=orig;
+  return scen;
+}
+function openSim(mod){
+  const m=MODS[mod]; const base=summarize(mod);
+  openModal(`
+    <div class="modal-h"><h3>📊 Simulador · ${m.name}</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b">
+      <div class="note" style="margin-bottom:14px">Probá escenarios sin tocar la lista. ${m.hasPrice?'Podés aplicar el aumento de precios a la lista real con el botón de abajo.':'Este módulo es un insumo interno (sin precios de venta).'}</div>
+      <div class="sim-row head"><div>Variable</div><div>Base</div><div>Escenario</div><div></div></div>
+      <div class="sim-row"><div>${mod==='petpe'?'Costo láminas (PET+PE) %':mod==='bandejas'?'Costo MP rPET %':'Precio MP / insumos %'}</div>
+        <div class="base">0%</div><div><input id="simMP" type="number" step="1" value="0"></div><div>%</div></div>
+      ${m.hasPrice?`<div class="sim-row"><div>Precios de venta %</div><div class="base">0%</div><div><input id="simPR" type="number" step="1" value="0"></div><div>%</div></div>`:'<input type="hidden" id="simPR" value="0">'}
+      <div class="sim-row"><div>Tipo de cambio</div><div class="base">${ars(TC())}</div><div><input id="simTC" type="number" step="1" value="${Math.round(TC())}"></div><div>ARS</div></div>
+
+      <div class="grid g2" style="margin-top:18px">
+        <div class="card"><div class="card-b stat"><div class="k">Costo promedio</div>
+          <div class="v" id="rCost">${usd(base.cost,m.unit==='/millar'?2:3)}<small>${base.unit}</small></div>
+          <div class="d" id="rCostD">sin cambios</div></div></div>
+        <div class="card"><div class="card-b stat"><div class="k">Margen ${mod==='bandejas'?'bruto':mod==='pe'?'—':'neto'} prom.</div>
+          <div class="v" id="rMar">${base.margin!=null?pct(base.margin,1):'—'}</div>
+          <div class="d" id="rMarD">sin cambios</div></div></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      ${m.hasPrice?`<button class="btn amber" id="simApplyPrice">Aplicar aumento de precios a la lista</button>`:''}
+      <button class="btn primary" onclick="closeModal()">Cerrar</button>
+    </div>`);
+
+  function recompute(){
+    const mp=num($('#simMP').value), pr=num($('#simPR').value), tc=num($('#simTC').value)||TC();
+    const scen=scenarioResult(mod,mp,pr,tc);
+    const dC=base.cost?(scen.cost-base.cost)/base.cost:0;
+    $('#rCost').innerHTML=usd(scen.cost,m.unit==='/millar'?2:3)+`<small>${base.unit}</small>`;
+    $('#rCostD').innerHTML=`<span class="delta ${dC>0.0001?'down':dC<-0.0001?'up':'flat'}">${dC>0?'+':''}${pct(dC,1)} vs base</span>`;
+    if(base.margin!=null){ $('#rMar').textContent=pct(scen.margin,1);
+      const dM=scen.margin-base.margin;
+      $('#rMarD').innerHTML=`<span class="delta ${dM>0.0001?'up':dM<-0.0001?'down':'flat'}">${dM>0?'+':''}${(dM*100).toFixed(1)} pts</span>`; }
+  }
+  $('#simMP').oninput=recompute; if($('#simPR').oninput!==undefined)$('#simPR').oninput=recompute; $('#simTC').oninput=recompute;
+  if($('#simApplyPrice')) $('#simApplyPrice').onclick=()=>{
+    const pr=num($('#simPR').value);
+    if(!pr){ toast('Poné un % de aumento primero','err'); return; }
+    if(!confirm(`¿Aplicar +${pr}% a TODOS los precios de venta de ${m.name}? Conviene guardar una versión antes.`)) return;
+    applyScenario(S,mod,1,1+pr/100); commit(); closeModal(); renderActive(); toast(`Precios de ${m.name} actualizados +${pr}%`,'ok');
+  };
+}
+const openPetSim=()=>openSim('pet'), openPeSim=()=>openSim('pe'), openPpSim=()=>openSim('petpe'), openBandejasSim=()=>openSim('bandejas');
+
+/* ============================================================
+   HISTORIAL DE LISTAS (snapshot manual)
+   ============================================================ */
+function priceSnapshot(){
+  // captura compacta de todas las listas de precios + TC + costos promedio
+  const vr=petVariantes();
+  const petRows=S.pet.clientes.map(c=>petClientRow(c,vr));
+  const ppRows=S.petpe.productos.map(petpeRow);
+  return {
+    tc:TC(),
+    pet:S.pet.clientes.map(c=>({cli:c.cli,v:c.v,act:c.act})),
+    petpe:S.petpe.productos.map(p=>({cli:p.cli,med:p.med,precio:p.precio})),
+    bandejas:{ ensaladeras:clone(S.bandejas.ensaladeras), clamshells:clone(S.bandejas.clamshells) },
+    kpis:{
+      petMargen:petRows.reduce((a,r)=>a+r.margenNeto,0)/(petRows.length||1),
+      ppMargen:ppRows.reduce((a,r)=>a+r.margenNeto,0)/(ppRows.length||1),
+      peCosto:calcPE().total
+    }
+  };
+}
+function openSnapshot(){
+  openModal(`
+    <div class="modal-h"><h3>🕘 Guardar versión de listas</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b">
+      <div class="note" style="margin-bottom:14px">Se guarda una foto de todas las listas de precios y el TC actual. Después podés consultarla o restaurarla desde el historial.</div>
+      <div class="field"><label>Etiqueta de la versión</label>
+        <div class="iw"><input id="snapLabel" type="text" placeholder="Ej: Lista marzo 2026 post-aumento" style="font-family:'IBM Plex Sans'"></div></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" id="snapSave">Guardar versión</button>
+    </div>`);
+  $('#snapLabel').focus();
+  $('#snapSave').onclick=()=>{
+    const label=$('#snapLabel').value.trim()||('Versión '+new Date().toLocaleString('es-AR'));
+    S.history.unshift({ id:Date.now(), date:nowISO(), label, snap:priceSnapshot() });
+    if(S.history.length>50) S.history.length=50;
+    commit(); closeModal(); toast('Versión guardada','ok');
+  };
+}
+function openHistory(){
+  if(!S.history.length){
+    openModal(`<div class="modal-h"><h3>🕘 Historial de listas</h3><button class="x" onclick="closeModal()">✕</button></div>
+      <div class="modal-b"><div class="empty">Todavía no guardaste ninguna versión.<br>Usá “Guardar versión” en el Resumen.</div></div>
+      <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
+    return;
+  }
+  openModal(`
+    <div class="modal-h"><h3>🕘 Historial de listas</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b">
+      <div class="tbl-wrap"><table><thead><tr><th>Versión</th><th>Fecha</th><th>TC</th><th>M.PET</th><th>M.PET/PE</th><th></th></tr></thead><tbody>
+        ${S.history.map(h=>`<tr>
+          <td style="white-space:normal"><b>${h.label}</b></td>
+          <td>${new Date(h.date).toLocaleString('es-AR')}</td>
+          <td class="num">${ars(h.snap.tc)}</td>
+          <td class="num">${pct(h.snap.kpis.petMargen,1)}</td>
+          <td class="num">${pct(h.snap.kpis.ppMargen,1)}</td>
+          <td class="row-actions">
+            <button class="btn sm" data-restore="${h.id}">Restaurar</button>
+            <button class="mini-x" data-delh="${h.id}">✕</button></td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="note" style="margin-top:10px">Restaurar reescribe los precios actuales con los de esa versión (los parámetros de costo no se tocan). Conviene guardar la versión vigente antes.</div>
+    </div>
+    <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
+  $$('#modal [data-restore]').forEach(b=>b.onclick=()=>{
+    const h=S.history.find(x=>x.id==b.dataset.restore); if(!h)return;
+    if(!confirm(`¿Restaurar precios de “${h.label}”? Se sobrescriben los precios actuales.`)) return;
+    restoreSnapshot(h.snap); commit(); closeModal(); renderActive(); toast('Versión restaurada','ok');
+  });
+  $$('#modal [data-delh]').forEach(b=>b.onclick=()=>{
+    S.history=S.history.filter(x=>x.id!=b.dataset.delh); commit(); openHistory();
+  });
+}
+function restoreSnapshot(snap){
+  snap.pet.forEach((p,i)=>{ if(S.pet.clientes[i]){ S.pet.clientes[i].act=p.act; S.pet.clientes[i].v=p.v; } });
+  snap.petpe.forEach((p,i)=>{ if(S.petpe.productos[i]) S.petpe.productos[i].precio=p.precio; });
+  if(snap.bandejas){ S.bandejas.ensaladeras=clone(snap.bandejas.ensaladeras); S.bandejas.clamshells=clone(snap.bandejas.clamshells); }
+}
+
+/* ============================================================
+   CONFIGURACIÓN / SYNC
+   ============================================================ */
+function openSettings(){
+  const cloud=useCloud();
+  openModal(`
+    <div class="modal-h"><h3>⚙️ Configuración &amp; sincronización</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b">
+      <div class="banner ${cloud?'ok':'warn'}">${cloud
+        ? `☁️ Sincronizando con JSONBin · bin <b>${binId||'(se crea al guardar)'}</b>`
+        : '💾 Modo local (este navegador). Pegá tu master key de JSONBin en el bloque CONFIG del archivo para sincronizar en la nube.'}</div>
+      <div class="field"><label>Tipo de cambio<small>Modo de actualización</small></label>
+        <div class="iw"><select id="cfgTcMode">
+          <option value="auto" ${S.tc.mode==='auto'?'selected':''}>Automático (dólar BNA)</option>
+          <option value="manual" ${S.tc.mode==='manual'?'selected':''}>Manual (fijo)</option>
+        </select></div></div>
+      <div class="note" style="margin-bottom:14px">
+        Para activar la nube: abrí el HTML, buscá <b>const CONFIG</b> arriba de todo y pegá tu <b>JSONBIN_KEY</b>
+        (y opcionalmente el <b>JSONBIN_BIN_ID</b>; si lo dejás vacío, se crea uno solo al primer guardado y lo verás en la consola).
+        Es el mismo esquema que el resto de las apps Winflex.
+      </div>
+      <div class="grid g2">
+        <button class="btn" id="cfgExport">⬇ Backup JSON</button>
+        <button class="btn" id="cfgImport">⬆ Restaurar JSON</button>
+      </div>
+      <input type="file" id="cfgFile" accept="application/json" style="display:none">
+      <div style="margin-top:14px"><button class="btn ghost" id="cfgReset" style="color:var(--red)">↺ Restablecer todo a los valores de fábrica</button></div>
+    </div>
+    <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
+  $('#cfgTcMode').onchange=e=>{ S.tc.mode=e.target.value; if(e.target.value==='auto') refreshTC(false); commit(); renderTCBar(); };
+  $('#cfgExport').onclick=()=>{ const blob=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
+    saveAs(blob,`winflex_costos_${new Date().toISOString().slice(0,10)}.json`); };
+  $('#cfgImport').onclick=()=>$('#cfgFile').click();
+  $('#cfgFile').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader();
+    rd.onload=()=>{ try{ const d=JSON.parse(rd.result); S=deepMerge(JSON.parse(JSON.stringify(SEED)),d); commit(); closeModal(); renderAll(); toast('Datos restaurados','ok'); }
+      catch(err){ toast('Archivo inválido','err'); } }; rd.readAsText(f); };
+  $('#cfgReset').onclick=()=>{ if(!confirm('¿Restablecer TODO a los valores de fábrica? Se pierden tus cambios locales.')) return;
+    S=JSON.parse(JSON.stringify(SEED)); commit(); closeModal(); renderAll(); toast('Restablecido','ok'); };
+}
+
+/* ============================================================
+   EXPORT EXCEL (ExcelJS · formato ejecutivo)
+   ============================================================ */
+const XF={ usd2:'"US$"#,##0.00', usd3:'"US$"#,##0.000', usd4:'"US$"#,##0.0000', ars:'"$"#,##0', pct:'0.0%', int:'#,##0' };
+const CLR={ teal:'FF0B6B63', tealD:'FF084F49', tealL:'FFE6F1F0', amber:'FFC8761A', amberL:'FFFBF0E2',
+  green:'FFE7F6EE', greenT:'FF1F9D57', yellow:'FFFCF4DD', yellowT:'FFB07D06', red:'FFFBE9E9', redT:'FFD64545',
+  ink:'FF15201F', muted:'FF7E8A85', line:'FFDDE3E6', white:'FFFFFFFF', zebra:'FFF4F8F7' };
+
+function fill(c){ return {type:'pattern',pattern:'solid',fgColor:{argb:c}}; }
+function thinBorder(){ const s={style:'thin',color:{argb:CLR.line}}; return {top:s,left:s,bottom:s,right:s}; }
+
+function addTitle(ws,title,sub,ncols){
+  ws.mergeCells(1,1,1,ncols);
+  const t=ws.getCell(1,1); t.value='WINFLEX · '+title; t.font={name:'Arial',bold:true,size:16,color:{argb:CLR.white}};
+  t.fill=fill(CLR.teal); t.alignment={vertical:'middle',horizontal:'left',indent:1}; ws.getRow(1).height=30;
+  ws.mergeCells(2,1,2,ncols);
+  const s=ws.getCell(2,1); s.value=sub; s.font={name:'Arial',size:10,italic:true,color:{argb:CLR.muted}};
+  s.fill=fill(CLR.tealL); s.alignment={horizontal:'left',indent:1}; ws.getRow(2).height=18;
+}
+function headerRow(ws,r,headers){
+  const row=ws.getRow(r);
+  headers.forEach((h,i)=>{ const c=row.getCell(i+1); c.value=h.t;
+    c.font={name:'Arial',bold:true,size:10,color:{argb:CLR.white}}; c.fill=fill(CLR.tealD);
+    c.alignment={horizontal:i===0?'left':'right',vertical:'middle',wrapText:true}; c.border=thinBorder(); });
+  row.height=26;
+}
+function dataRows(ws,start,headers,rows){
+  rows.forEach((rd,ri)=>{ const row=ws.getRow(start+ri);
+    headers.forEach((h,ci)=>{ const c=row.getCell(ci+1); const val=rd[h.k];
+      c.value=(val===undefined||val===null||val==='')?(h.fmt?0:''):val;
+      c.font={name:'Arial',size:10,color:{argb:CLR.ink}};
+      c.alignment={horizontal:ci===0?'left':'right'};
+      if(h.fmt) c.numFmt=h.fmt;
+      c.border=thinBorder();
+      if(ri%2===1) c.fill=fill(CLR.zebra);
+      if(h.sem && val!=null){ const s=semaforo(val, rd.__sg??0.30, rd.__sa??0.15);
+        c.fill=fill(s==='v'?CLR.green:s==='a'?CLR.yellow:CLR.red);
+        c.font={name:'Arial',size:10,bold:true,color:{argb:s==='v'?CLR.greenT:s==='a'?CLR.yellowT:CLR.redT}}; }
+    });
+  });
+}
+function setCols(ws,headers){ headers.forEach((h,i)=>{ ws.getColumn(i+1).width=h.w||12; }); }
+function totalRow(ws,r,headers,vals){
+  const row=ws.getRow(r);
+  headers.forEach((h,i)=>{ const c=row.getCell(i+1); c.value=vals[h.k]!==undefined?vals[h.k]:(i===0?'PROMEDIO':'');
+    c.font={name:'Arial',bold:true,size:10,color:{argb:CLR.ink}}; c.fill=fill(CLR.amberL);
+    c.alignment={horizontal:i===0?'left':'right'}; if(h.fmt&&vals[h.k]!==undefined)c.numFmt=h.fmt; c.border=thinBorder(); });
+  row.height=22;
+}
+async function download(wb,name){ const buf=await wb.xlsx.writeBuffer();
+  saveAs(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),name); toast('Excel generado','ok'); }
+const stamp=()=>`TC ${ars(TC())} · ${new Date().toLocaleString('es-AR')}`;
+
+async function exportPET(){
+  const vr=petVariantes(); const rows=S.pet.clientes.map(c=>petClientRow(c,vr));
+  const wb=new ExcelJS.Workbook();
+  // Hoja clientes
+  const ws=wb.addWorksheet('Lista clientes');
+  const H=[{t:'Cliente',k:'cli',w:22},{t:'Variante',k:'variante',w:18},{t:'P. anterior',k:'ant',w:12,fmt:XF.usd2},
+    {t:'P. actual',k:'precio',w:12,fmt:XF.usd2},{t:'Aumento',k:'aumento',w:10,fmt:XF.pct},{t:'Costo',k:'costo',w:12,fmt:XF.usd2},
+    {t:'M. Bruto',k:'margenBruto',w:10,fmt:XF.pct},{t:'M. Neto USD',k:'netoUSD',w:12,fmt:XF.usd2},{t:'M. Neto %',k:'margenNeto',w:11,fmt:XF.pct,sem:true}];
+  addTitle(ws,'PET Lámina · Lista de precios',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  const n=rows.length;
+  totalRow(ws,5+n,H,{cli:'PROMEDIO',ant:rows.reduce((a,r)=>a+r.ant,0)/n,precio:rows.reduce((a,r)=>a+r.precio,0)/n,
+    costo:rows.reduce((a,r)=>a+r.costo,0)/n,margenBruto:rows.reduce((a,r)=>a+r.margenBruto,0)/n,
+    netoUSD:rows.reduce((a,r)=>a+r.netoUSD,0)/n,margenNeto:rows.reduce((a,r)=>a+r.margenNeto,0)/n});
+  ws.views=[{state:'frozen',ySplit:4}];
+  // Hoja variantes
+  const wv=wb.addWorksheet('Costo variantes');
+  const HV=[{t:'Variante',k:'nom',w:22},{t:'MP base',k:'mpBase',w:12,fmt:XF.usd3},{t:'MP ajust.',k:'mpAjust',w:12,fmt:XF.usd3},
+    {t:'Proc. c/flete',k:'procC',w:13,fmt:XF.usd3},{t:'Total c/flete',k:'cFlete',w:13,fmt:XF.usd3},{t:'Total s/flete',k:'sFlete',w:13,fmt:XF.usd3},{t:'ARS/kg',k:'arsC',w:13,fmt:XF.ars}];
+  addTitle(wv,'PET Lámina · Costo por variante',stamp(),HV.length); setCols(wv,HV); headerRow(wv,4,HV); dataRows(wv,5,HV,vr);
+  await download(wb,'Winflex_PET_lista.xlsx');
+}
+async function exportPE(){
+  const c=calcPE(); const wb=new ExcelJS.Workbook(); const ws=wb.addWorksheet('Costo Film PE');
+  const H=[{t:'Concepto',k:'k',w:30},{t:'USD/kg',k:'usd',w:14,fmt:XF.usd3},{t:'ARS/kg',k:'ars',w:14,fmt:XF.ars}];
+  const rows=[{k:'Materia prima (ajust. merma)',usd:c.mpAjust,ars:c.mpAjust*TC()},
+    {k:'Mano de obra',usd:c.MO,ars:c.MO*TC()},{k:'Energía',usd:c.energia,ars:c.energia*TC()},
+    {k:'Otros + indirectos',usd:c.otros+c.indirectos,ars:(c.otros+c.indirectos)*TC()}];
+  addTitle(ws,'Film PE · Costo (insumo interno)',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  totalRow(ws,5+rows.length,H,{k:'TOTAL',usd:c.total,ars:c.totalARS});
+  // insumos
+  const wi=wb.addWorksheet('Insumos PE');
+  const HI=[{t:'Cód',k:'cod',w:8},{t:'Descripción',k:'desc',w:30},{t:'Proveedor',k:'prov',w:18},{t:'USD/kg',k:'usd',w:12,fmt:XF.usd2},{t:'ARS/kg',k:'arsv',w:13,fmt:XF.ars},{t:'Actualizado',k:'upd',w:13}];
+  addTitle(wi,'Film PE · Insumos',stamp(),HI.length); setCols(wi,HI); headerRow(wi,4,HI);
+  dataRows(wi,5,HI,S.pe.insumos.map(m=>({...m,arsv:m.usd*TC()})));
+  await download(wb,'Winflex_FilmPE_costo.xlsx');
+}
+async function exportPETPE(){
+  const rows=S.petpe.productos.map(petpeRow); const wb=new ExcelJS.Workbook(); const ws=wb.addWorksheet('Productos');
+  const H=[{t:'Cliente',k:'cli',w:20},{t:'Medida',k:'med',w:12},{t:'Esp.PET',k:'ePET',w:9,fmt:XF.int},{t:'Esp.PE',k:'ePE',w:9,fmt:XF.int},
+    {t:'Tiras',k:'tiras',w:7,fmt:XF.int},{t:'kg/m²',k:'kgTot',w:9,fmt:'0.000'},{t:'Costo',k:'costo',w:12,fmt:XF.usd2},
+    {t:'Precio',k:'precio',w:11,fmt:XF.usd2},{t:'M. Bruto',k:'margenBruto',w:10,fmt:XF.pct},{t:'M. Neto USD',k:'netoUSD',w:12,fmt:XF.usd2},{t:'M. Neto %',k:'margenNeto',w:11,fmt:XF.pct,sem:true}];
+  addTitle(ws,'Laminado PET/PE · Productos',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  const n=rows.length;
+  totalRow(ws,5+n,H,{cli:'PROMEDIO',costo:rows.reduce((a,r)=>a+r.costo,0)/n,precio:rows.reduce((a,r)=>a+r.precio,0)/n,
+    margenBruto:rows.reduce((a,r)=>a+r.margenBruto,0)/n,netoUSD:rows.reduce((a,r)=>a+r.netoUSD,0)/n,margenNeto:rows.reduce((a,r)=>a+r.margenNeto,0)/n});
+  ws.views=[{state:'frozen',ySplit:4}];
+  await download(wb,'Winflex_LaminadoPETPE.xlsx');
+}
+async function exportBandejas(){
+  const wb=new ExcelJS.Workbook(); const p=S.bandejas.params;
+  const wc=wb.addWorksheet('Costos');
+  const HC=[{t:'Cód',k:'cod',w:9},{t:'Línea',k:'linea',w:12},{t:'Material',k:'mat',w:10},{t:'Bruto g',k:'bruto',w:9,fmt:'0.00'},
+    {t:'Neto g',k:'neto',w:9,fmt:'0.00'},{t:'Vel u/h',k:'vel',w:9,fmt:XF.int},{t:'MP USD/u',k:'cMP',w:11,fmt:XF.usd4},
+    {t:'MO USD/u',k:'cMO',w:11,fmt:XF.usd4},{t:'USD/millar',k:'usdMillar',w:12,fmt:XF.usd2}];
+  addTitle(wc,'Bandejas · Costo por producto',stamp(),HC.length); setCols(wc,HC); headerRow(wc,4,HC);
+  dataRows(wc,5,HC,S.bandejas.productos.map(pr=>({...pr,...bandejaCost(pr)})));
+  // ensaladeras
+  const we=wb.addWorksheet('Ensaladeras precios');
+  const HE=[{t:'Cliente',k:'cli',w:20},{t:'Producto',k:'cod',w:10},{t:'Moneda',k:'mon',w:9},{t:'Precio orig.',k:'val',w:12},
+    {t:'USD/millar',k:'precio',w:12,fmt:XF.usd2},{t:'Costo',k:'costo',w:12,fmt:XF.usd2},{t:'Margen %',k:'m',w:11,fmt:XF.pct,sem:true}];
+  const erows=[]; S.bandejas.ensaladeras.forEach(e=>Object.entries(e.p).forEach(([cod,val])=>{
+    const precio=e.mon==='USD'?val:val/TC(); const costo=bandejaCostByCod(cod);
+    erows.push({cli:e.cli,cod,mon:e.mon,val,precio,costo,m:precio?(precio-costo)/precio:0,__sg:p.semVerde,__sa:p.semAmarillo}); }));
+  addTitle(we,'Bandejas · Ensaladeras por cliente',stamp(),HE.length); setCols(we,HE); headerRow(we,4,HE); dataRows(we,5,HE,erows);
+  // clamshells
+  const wcl=wb.addWorksheet('Clamshells precios');
+  const HL=[{t:'Producto',k:'cod',w:10},{t:'USD/millar',k:'val',w:12,fmt:XF.usd2},{t:'Costo',k:'costo',w:12,fmt:XF.usd2},{t:'Margen %',k:'m',w:11,fmt:XF.pct,sem:true}];
+  const lrows=Object.entries(S.bandejas.clamshells).map(([cod,val])=>{ const costo=bandejaCostByCod(cod);
+    return {cod,val,costo,m:val?(val-costo)/val:0,__sg:p.semVerde,__sa:p.semAmarillo}; });
+  addTitle(wcl,'Bandejas · Clamshells (lista única)',stamp(),HL.length); setCols(wcl,HL); headerRow(wcl,4,HL); dataRows(wcl,5,HL,lrows);
+  await download(wb,'Winflex_Bandejas.xlsx');
+}
+async function exportConsolidado(){
+  const d=moduleSummary(); const wb=new ExcelJS.Workbook();
+  const ws=wb.addWorksheet('Resumen ejecutivo');
+  const H=[{t:'Módulo',k:'mod',w:22},{t:'Ítems',k:'n',w:9,fmt:XF.int},{t:'Margen prom.',k:'avg',w:13,fmt:XF.pct,sem:true},
+    {t:'Costo ref. USD',k:'cost',w:14,fmt:XF.usd3},{t:'Peor ítem',k:'worst',w:26},{t:'Peor margen',k:'wm',w:12,fmt:XF.pct}];
+  addTitle(ws,'Costos & Precios · Consolidado',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H);
+  const rows=[
+    {mod:'PET Lámina (neto)',n:d.petC.length,avg:d.petAvg,cost:d.petC.reduce((a,r)=>a+r.costo,0)/(d.petC.length||1),worst:d.petMin.cli||'-',wm:d.petMin.margenNeto||0,__sg:0.30,__sa:0.15},
+    {mod:'Laminado PET/PE (neto)',n:d.ppRows.length,avg:d.ppAvg,cost:d.ppRows.reduce((a,r)=>a+r.costo,0)/(d.ppRows.length||1),worst:d.ppMin.cli||'-',wm:d.ppMin.margenNeto||0,__sg:0.30,__sa:0.15},
+    {mod:'Bandejas (bruto)',n:d.bRows.length,avg:d.bAvg,cost:0,worst:(d.bMin.cli||'-')+' '+(d.bMin.cod||''),wm:d.bMin.m||0,__sg:S.bandejas.params.semVerde,__sa:S.bandejas.params.semAmarillo},
+    {mod:'Film PE (insumo)',n:1,avg:'',cost:d.peTot,worst:'-',wm:''}
+  ];
+  dataRows(ws,5,H,rows);
+  ws.views=[{state:'frozen',ySplit:4}];
+  await download(wb,'Winflex_Costos_consolidado.xlsx');
+}
+
+/* ============================================================
+   LOGIN + INIT
+   ============================================================ */
+function tryLogin(){
+  const inp=$('#pinInput'); const v=(inp.value||'').trim();
+  if(v===CONFIG.ADMIN_PIN){ $('#loginErr').textContent=''; enterApp(); }
+  else{
+    $('#loginErr').textContent='PIN incorrecto';
+    inp.classList.add('shake'); inp.value='';
+    setTimeout(()=>{ inp.classList.remove('shake'); $('#loginErr').textContent=''; inp.focus(); },800);
+  }
+}
+async function enterApp(){
+  $('#login').style.display='none'; $('#app').style.display='block';
+  await loadState();
+  if(S.tc.mode==='auto') await fetchTC();
+  renderTCBar(); renderActive();
+}
+function setTab(tab){
+  activeTab=tab;
+  $$('#tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+tab));
+  renderActive();
+}
+
+function init(){
+  const inp=$('#pinInput');
+  $('#pinGo').onclick=tryLogin;
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter') tryLogin(); });
+  inp.focus();
+  $$('#tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+  $('#btnHistory').onclick=openHistory;
+  $('#btnSettings').onclick=openSettings;
+  $('#btnLogout').onclick=()=>{ $('#pinInput').value=''; $('#app').style.display='none'; $('#login').style.display='flex'; $('#pinInput').focus(); };
+  $('#tcInput').onchange=e=>{ S.tc.value=num(e.target.value); S.tc.mode='manual'; commit(); renderTCBar(); renderActive(); };
+  $('#tcRefresh').onclick=()=>refreshTC(true);
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&$('#modalBg').classList.contains('open')) closeModal(); });
+}
+init();
+</script>
+</body>
+</html>

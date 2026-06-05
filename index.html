@@ -11,21 +11,21 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 <style>
 :root{
-  --bg:#e9edf0; --card:#ffffff; --ink:#15201f; --ink2:#445049; --muted:#7e8a85;
-  --line:#dde3e6; --line2:#eef2f4;
-  --teal:#0b6b63; --teal-d:#084f49; --teal-l:#e6f1f0; --teal-l2:#f1f8f7;
-  --amber:#c8761a; --amber-l:#fbf0e2;
-  --green:#1f9d57; --green-l:#e7f6ee;
-  --yellow:#d99a08; --yellow-l:#fcf4dd;
-  --red:#d64545; --red-l:#fbe9e9;
-  --blue:#2563a8; --blue-l:#e8f0f9;
-  --shadow:0 1px 2px rgba(20,32,31,.06),0 4px 16px rgba(20,32,31,.05);
-  --shadow-lg:0 12px 40px rgba(20,32,31,.16);
-  --r:14px; --r-sm:9px;
+  --bg:#eef1f3; --card:#ffffff; --ink:#1a2622; --ink2:#48564f; --muted:#8a958f;
+  --line:#e7ebed; --line2:#f2f5f6;
+  --teal:#15a463; --teal-d:#0e8551; --teal-l:#e3f6ec; --teal-l2:#f2fbf6;
+  --amber:#e8731e; --amber-l:#fdeede;
+  --green:#15a463; --green-l:#e3f6ec;
+  --yellow:#e0950a; --yellow-l:#fdf3da;
+  --red:#e25555; --red-l:#fdecec;
+  --blue:#2c74c4; --blue-l:#e9f1fb;
+  --shadow:0 1px 2px rgba(26,38,34,.04),0 6px 22px rgba(26,38,34,.05);
+  --shadow-lg:0 18px 50px rgba(26,38,34,.16);
+  --r:18px; --r-sm:12px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans',sans-serif;-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.45}
-body{background-image:radial-gradient(circle at 18% -8%,rgba(11,107,99,.07),transparent 42%),radial-gradient(circle at 100% 0%,rgba(200,118,26,.05),transparent 36%);min-height:100vh}
+body{background-image:radial-gradient(circle at 15% -10%,rgba(21,164,99,.08),transparent 45%),radial-gradient(circle at 100% 0%,rgba(232,115,30,.06),transparent 38%);min-height:100vh}
 .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
 h1,h2,h3,h4{font-family:'Archivo',sans-serif;font-weight:700;letter-spacing:-.01em;line-height:1.15}
 button{font-family:inherit;cursor:pointer}
@@ -34,7 +34,7 @@ a{color:var(--teal);text-decoration:none}
 
 /* ---------- LOGIN ---------- */
 #login{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;
-  background:linear-gradient(150deg,#0b6b63,#063d39 70%);padding:24px}
+  background:linear-gradient(150deg,#15a463,#0a5e3a 75%);padding:24px}
 .login-card{background:var(--card);border-radius:20px;padding:38px 34px;width:100%;max-width:380px;box-shadow:var(--shadow-lg);text-align:center}
 .login-card .logo{font-family:'Archivo';font-weight:800;font-size:30px;letter-spacing:-.03em;color:var(--teal)}
 .login-card .logo span{color:var(--amber)}
@@ -74,7 +74,7 @@ nav.tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--line
 nav.tabs button{flex:1;min-width:120px;border:none;background:transparent;padding:11px 14px;border-radius:9px;font-weight:600;font-size:13.5px;color:var(--ink2);display:flex;align-items:center;justify-content:center;gap:8px;transition:.15s;white-space:nowrap}
 nav.tabs button .dot{width:9px;height:9px;border-radius:3px}
 nav.tabs button:hover{background:var(--line2)}
-nav.tabs button.active{background:var(--teal);color:#fff;box-shadow:0 4px 12px rgba(11,107,99,.28)}
+nav.tabs button.active{background:var(--teal);color:#fff;box-shadow:0 6px 16px rgba(21,164,99,.30)}
 nav.tabs button.active .dot{background:rgba(255,255,255,.85)!important}
 
 .page{display:none;animation:fade .3s ease}
@@ -119,14 +119,16 @@ nav.tabs button.active .dot{background:rgba(255,255,255,.85)!important}
 /* tables */
 .tbl-wrap{overflow-x:auto;border-radius:var(--r)}
 table{width:100%;border-collapse:collapse;font-size:13px}
-table th{background:var(--teal-l2);color:var(--ink2);font-weight:600;text-align:right;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0}
+table th{background:var(--card);color:var(--muted);font-weight:600;text-align:right;padding:12px 14px;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1.5px solid var(--line);white-space:nowrap;position:sticky;top:0}
 table th:first-child,table td:first-child{text-align:left}
-table td{padding:9px 12px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap}
+table td{padding:11px 14px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap}
 table tr:last-child td{border-bottom:none}
 table tbody tr:hover{background:var(--teal-l2)}
 table .num{font-family:'IBM Plex Mono';font-variant-numeric:tabular-nums}
-table tr.total td{font-weight:700;background:var(--teal-l);border-top:2px solid var(--teal)}
-.tinp{width:100%;max-width:90px;border:1px solid var(--line);border-radius:7px;padding:5px 7px;text-align:right;font-family:'IBM Plex Mono';background:#fffdf7;color:var(--ink)}
+table tr.total td{font-weight:700;background:var(--teal-l);border-top:1.5px solid var(--teal)}
+.tinp{width:100%;max-width:92px;border:1px solid var(--line);border-radius:9px;padding:6px 9px;text-align:right;font-family:'IBM Plex Mono';background:var(--line2);color:var(--ink);transition:.13s;-moz-appearance:textfield;appearance:textfield}
+.tinp::-webkit-outer-spin-button,.tinp::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.tinp:hover{background:#fff;border-color:#d3dad8}
 .tinp:focus{outline:none;border-color:var(--teal);background:#fff;box-shadow:0 0 0 3px var(--teal-l)}
 .tinp.edited{border-color:var(--amber);background:var(--amber-l)}
 .tsel{border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:#fff}
@@ -144,7 +146,7 @@ table tr.total td{font-weight:700;background:var(--teal-l);border-top:2px solid 
 .field label{font-size:12px;font-weight:600;color:var(--ink2)}
 .field label small{display:block;font-weight:400;color:var(--muted);font-size:11px;margin-top:1px}
 .field .iw{display:flex;align-items:center;gap:8px}
-.field input,.field select{flex:1;border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:#fffdf7;color:var(--ink);font-family:'IBM Plex Mono'}
+.field input,.field select{flex:1;border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:var(--line2);color:var(--ink);font-family:'IBM Plex Mono'}
 .field input:focus,.field select:focus{outline:none;border-color:var(--teal);background:#fff;box-shadow:0 0 0 3px var(--teal-l)}
 .field .unit{font-size:12px;color:var(--muted);min-width:48px}
 .params-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 26px}
@@ -172,7 +174,7 @@ table tr.total td{font-weight:700;background:var(--teal-l);border-top:2px solid 
 /* simulator */
 .sim-row{display:grid;grid-template-columns:1.4fr 1fr 1fr 70px;gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line2);font-size:13px}
 .sim-row.head{font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid var(--line)}
-.sim-row input{border:1px solid var(--line);border-radius:8px;padding:7px 9px;text-align:right;font-family:'IBM Plex Mono';background:#fffdf7;width:100%}
+.sim-row input{border:1px solid var(--line);border-radius:8px;padding:7px 9px;text-align:right;font-family:'IBM Plex Mono';background:var(--line2);width:100%}
 .sim-row .base{color:var(--muted);font-family:'IBM Plex Mono';text-align:right}
 
 .banner{padding:12px 16px;border-radius:11px;font-size:13px;display:flex;align-items:center;gap:10px;margin-bottom:16px}
@@ -787,8 +789,8 @@ function renderPET(){
         return `<tr>
         <td><input class="tinp" style="max-width:130px;text-align:left;font-family:'IBM Plex Sans'" data-path="pet.clientes.${r.i}.cli" value="${r.cli}"></td>
         <td><select class="tsel" data-path="pet.clientes.${r.i}.v">${opts.map(o=>`<option value="${o.v}" ${o.v==r.v?'selected':''}>${o.t}</option>`).join('')}</select></td>
-        <td>${nInp(`pet.clientes.${r.i}.ant`,r.ant,{w:64})}</td>
-        <td>${nInp(`pet.clientes.${r.i}.act`,r.act,{w:64})}</td>
+        <td>${nInp(`pet.clientes.${r.i}.ant`,r.ant,{w:78})}</td>
+        <td>${nInp(`pet.clientes.${r.i}.act`,r.act,{w:78})}</td>
         <td class="num delta ${ar>0.0001?'up':ar<-0.0001?'down':'flat'}">${ar>0?'+':''}${pct(ar,1)}</td>
         <td class="num">${usd(r.costo,2)}</td>
         <td class="num">${pct(r.margenBruto,1)}</td>
@@ -959,7 +961,7 @@ function renderPETPE(){
         <td>${nInp(`petpe.productos.${r.i}.tiras`,r.tiras,{w:42})}</td>
         <td class="num">${pct(r.yPET,0)}</td>
         <td class="num">${usd(r.costo,2)}</td>
-        <td>${nInp(`petpe.productos.${r.i}.precio`,r.precio,{w:60})}</td>
+        <td>${nInp(`petpe.productos.${r.i}.precio`,r.precio,{w:80})}</td>
         <td class="num">${pct(r.margenBruto,1)}</td>
         <td class="num">${usd(r.netoUSD,2)}</td>
         <td class="num"><b>${pct(r.margenNeto,1)}</b></td>

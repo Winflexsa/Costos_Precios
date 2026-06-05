@@ -471,7 +471,8 @@ async function saveState(){
         const r=await fetch('https://api.jsonbin.io/v3/b',{method:'POST',
           headers:{'Content-Type':'application/json','X-Master-Key':CONFIG.JSONBIN_KEY,'X-Bin-Name':'winflex_costos'},
           body:JSON.stringify(S)});
-        if(r.ok){ const j=await r.json(); binId=j.metadata.id; console.log('Nuevo bin creado:',binId); toast('Bin creado: '+binId,'ok'); }
+        if(r.ok){ const j=await r.json(); binId=j.metadata.id; console.log('Nuevo bin creado:',binId);
+          alert('⚠ IMPORTANTE — Se creó un bin nuevo en JSONBin:\n\n'+binId+'\n\nPara que la PC y la tablet vean los MISMOS datos, pegá este ID en el archivo index.html, en JSONBIN_BIN_ID (bloque CONFIG, arriba de todo), y volvé a subirlo a GitHub.\n\nSi no lo fijás, cada dispositivo va a crear su propio bin y no se van a sincronizar.'); }
       }else{
         await fetch(`https://api.jsonbin.io/v3/b/${binId}`,{method:'PUT',
           headers:{'Content-Type':'application/json','X-Master-Key':CONFIG.JSONBIN_KEY},body:JSON.stringify(S)});

@@ -205,6 +205,26 @@ table tr.total td{font-weight:700;background:var(--teal-l);border-top:1.5px soli
 .mini-x:hover{background:var(--red-l);color:var(--red)}
 .search{border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-width:200px;background:#fff}
 .search:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-l)}
+
+/* ---------- SUB-NAV (Costos / Precios dentro de cada línea) ---------- */
+.subnav{display:inline-flex;gap:4px;background:var(--line2);border:1px solid var(--line);border-radius:13px;padding:4px;margin:0 2px 18px}
+.subnav button{border:none;background:transparent;padding:8px 20px;border-radius:10px;font-weight:600;font-size:13px;color:var(--ink2);transition:.14s}
+.subnav button:hover{color:var(--ink)}
+.subnav button.active{background:var(--card);color:var(--teal);box-shadow:var(--shadow)}
+/* fórmula bajo cada componente de costo (paso a paso) */
+.formula{font-family:'IBM Plex Mono';font-size:10.5px;color:var(--muted);line-height:1.5;font-weight:400}
+td .formula{display:block;margin-top:3px;white-space:normal}
+/* matriz de recetas */
+.matrix td,.matrix th{padding:8px 9px}
+.matrix .badrow td{background:var(--red-l)}
+/* fila desplegable de detalle */
+.exp-row td{background:var(--teal-l2);border-bottom:1px solid var(--line)!important}
+.exp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px 20px;text-align:left;padding:6px 2px}
+.exp-grid .ei{font-size:12px;color:var(--ink2)}
+.exp-grid .ei b{display:block;font-family:'IBM Plex Mono';font-size:14px;color:var(--ink);font-weight:600;margin-top:1px}
+.exp-grid .ei .ef{display:block;font-family:'IBM Plex Mono';font-size:10px;color:var(--muted);margin-top:1px}
+.lnk{cursor:pointer;color:var(--teal);font-weight:600;font-size:11.5px;white-space:nowrap}
+.lnk:hover{text-decoration:underline}
 </style>
 </head>
 <body>
@@ -745,106 +765,200 @@ function renderDash(){
 }
 
 /* ============================================================
+   SUB-NAVEGACIÓN + ANATOMÍA DE COSTO (compartido por las líneas)
+   ============================================================ */
+const subTab={pet:'costos',pe:'costos',petpe:'costos',bandejas:'costos'};
+let ppExp=new Set(), bExp=new Set();
+function subnav(mod,tabs){
+  return `<nav class="subnav" data-subnav="${mod}">${tabs.map(t=>
+    `<button data-sub="${t.id}" class="${subTab[mod]===t.id?'active':''}">${t.label}</button>`).join('')}</nav>`;
+}
+function wireSub(mod,fn){
+  $$(`[data-subnav="${mod}"] [data-sub]`).forEach(b=>b.onclick=()=>{ subTab[mod]=b.dataset.sub; fn(); });
+}
+const nf=v=>(v||0).toLocaleString('es-AR');
+/* tarjeta de anatomía: parts=[{label,formula,usd,color}] */
+function anatomyCard(title,parts,totalLabel,{tag='',unit='/kg',dec=4}={}){
+  const tc=TC(), tot=parts.reduce((a,p)=>a+p.usd,0)||1;
+  const bar=breakdownBar(parts.map(p=>({label:p.label,val:p.usd,color:p.color})));
+  return `<div class="card"><div class="card-h"><h3>${title}</h3>${tag?`<span class="tag">${tag}</span>`:''}</div>
+    <div class="card-b">${bar}
+    <div class="tbl-wrap" style="margin-top:14px"><table><thead><tr>
+      <th>Componente</th><th>USD${unit}</th><th>ARS${unit}</th><th>% costo</th></tr></thead><tbody>
+      ${parts.map(p=>`<tr><td style="white-space:normal;text-align:left"><b>${p.label}</b>${p.formula?`<span class="formula">${p.formula}</span>`:''}</td>
+        <td class="num">${usd(p.usd,dec)}</td><td class="num">${ars(p.usd*tc)}</td><td class="num">${pct(p.usd/tot,1)}</td></tr>`).join('')}
+      <tr class="total"><td style="text-align:left">${totalLabel}</td><td class="num">${usd(tot,dec)}</td><td class="num">${ars(tot*tc)}</td><td class="num">100%</td></tr>
+    </tbody></table></div></div></div>`;
+}
+
+/* ============================================================
    MÓDULO PET LÁMINA
    ============================================================ */
 let petSearch='';
 function renderPET(){
   const vr=petVariantes();
+  const proc=petProc(), p=S.pet.params, n=S.pet.net, tc=TC();
   const rows=S.pet.clientes.map((c,i)=>({...petClientRow(c,vr),i}));
-  const filt=rows.filter(r=>!petSearch||r.cli.toLowerCase().includes(petSearch.toLowerCase()));
-  const avgNeto=rows.reduce((a,r)=>a+r.margenNeto,0)/(rows.length||1);
-  const avgBruto=rows.reduce((a,r)=>a+r.margenBruto,0)/(rows.length||1);
-  const opts=S.pet.variantes.map((v,i)=>({v:i,t:v.nom}));
-  const n=S.pet.net, p=S.pet.params, proc=petProc();
+  const sub=subTab.pet;
 
-  $('#page-pet').innerHTML=`
-  <div class="section-head"><div><h2>PET Lámina</h2><div class="sub">7 variantes de rPET/PET virgen · ${rows.length} clientes</div></div>
+  const head=`<div class="section-head"><div><h2>PET Lámina</h2><div class="sub">7 variantes rPET/PET virgen · ${rows.length} clientes</div></div>
     <div class="sh-spacer"></div>
     <button class="btn" id="petSim">📊 Simulador</button>
     <button class="btn" id="petExport">⬇ Excel</button>
   </div>
+  ${subnav('pet',[{id:'costos',label:'🧮 Costos'},{id:'precios',label:'🏷️ Precios'}])}`;
 
-  <div class="grid g4" style="margin-bottom:16px">
-    <div class="card stat accent"><div class="k">Margen neto prom.</div><div class="v">${pct(avgNeto,1)}</div><div class="d">después de gastos + Ganancias</div></div>
-    <div class="card stat"><div class="k">Margen bruto prom.</div><div class="v">${pct(avgBruto,1)}</div><div class="d">precio − costo</div></div>
-    <div class="card stat"><div class="k">Costo procesamiento</div><div class="v">${usd(proc.totalCFlete,3)}<small>/kg</small></div><div class="d">c/flete · ${usd(proc.totalSFlete,3)} s/flete</div></div>
-    <div class="card stat"><div class="k">Precio prom.</div><div class="v">${usd(rows.reduce((a,r)=>a+r.precio,0)/(rows.length||1),2)}<small>/kg</small></div><div class="d">lista vigente</div></div>
-  </div>
+  let body;
+  if(sub==='costos'){
+    const parts=[
+      {label:'Energía',formula:'directo de parámetros',usd:proc.energia,color:'var(--blue)'},
+      {label:'Mano de obra',formula:`$${nf(p.valorHora)} × ${p.operarios} op × ${p.cargas} cargas ÷ ${p.prodHora} kg/h ÷ TC`,usd:proc.MO,color:'var(--teal)'},
+      {label:'Cono',formula:`($${nf(p.conoARSkg)}/kg × ${p.conoKgBobina} ÷ ${p.kgBobinaProd} kg) ÷ TC`,usd:proc.cono,color:'var(--amber)'},
+      {label:'Pallet',formula:`$${nf(p.palletARS)} ÷ ${p.palletCap} kg ÷ TC`,usd:proc.pallet,color:'#9b6dd6'},
+      {label:'Stretch + etiquetas',formula:`${pct(p.stretchPct,0)} sobre cono+pallet`,usd:proc.stretch,color:'#d6a96d'},
+      {label:'Flete',formula:`$${nf(p.fletePallet)} × ${pct(p.pctFlete,0)} ÷ ${p.palletCap} kg ÷ TC`,usd:proc.flete,color:'var(--red)'},
+      {label:'Otros varios',formula:'directo de parámetros',usd:proc.otros,color:'var(--muted)'},
+      {label:'Otros indirectos',formula:'directo de parámetros',usd:proc.indirectos,color:'#b8c0bc'}
+    ];
+    const factor=1/(1-(p.merma-p.recuperacion));
+    const matrix=`<div class="card" style="margin-bottom:16px">
+      <div class="card-h"><h3>Recetas · composición por variante</h3><span class="tag">% de cada MP · debe sumar 100%</span></div>
+      <div class="card-b"><div class="tbl-wrap"><table class="matrix"><thead><tr><th>Variante</th>
+        ${S.pet.insumos.slice(0,6).map(m=>`<th>${m.cod}</th>`).join('')}<th>Suma</th><th>MP base</th></tr></thead><tbody>
+        ${S.pet.variantes.map((v,vi)=>{ const sum=v.r.reduce((a,x)=>a+x,0); const ok=Math.abs(sum-1)<0.001;
+          let mpBase=0; v.r.forEach((x,j)=>mpBase+=x*(S.pet.insumos[j]?S.pet.insumos[j].usd:0));
+          return `<tr class="${ok?'':'badrow'}"><td style="text-align:left"><b>${v.nom}</b></td>
+            ${v.r.map((x,j)=>`<td>${nInp(`pet.variantes.${vi}.r.${j}`,x,{w:58})}</td>`).join('')}
+            <td class="num" style="color:${ok?'var(--green)':'var(--red)'}"><b>${pct(sum,0)}</b></td>
+            <td class="num">${usd(mpBase,3)}</td></tr>`;}).join('')}
+      </tbody></table></div>
+      <div class="note" style="margin-top:8px">Cada celda es el % del insumo en la mezcla. MP01-MP06 = preforma molida, scrap, virgen, master blanco, negro, azulino. La columna MP base es el costo de materia prima antes de ajustar por merma.</div></div></div>`;
 
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-h"><h3>Costo por variante</h3><span class="tag">USD/kg · merma ${pct(p.merma-p.recuperacion,0)} neta</span></div>
-    <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-      <th>Variante</th><th>MP base</th><th>MP ajust.</th><th>Proc. c/flete</th><th>Total c/flete</th><th>Total s/flete</th><th>ARS/kg</th></tr></thead><tbody>
-      ${vr.map(v=>`<tr><td>${v.nom}</td><td class="num">${usd(v.mpBase,3)}</td><td class="num">${usd(v.mpAjust,3)}</td>
-        <td class="num">${usd(v.procC,3)}</td><td class="num"><b>${usd(v.cFlete,3)}</b></td><td class="num">${usd(v.sFlete,3)}</td><td class="num">${ars(v.arsC)}</td></tr>`).join('')}
-    </tbody></table></div></div>
-  </div>
-
-  <div class="grid g2" style="margin-bottom:16px">
-    <div class="card">
-      <div class="card-h"><h3>Insumos / Materias primas</h3><span class="tag">editá USD/kg</span></div>
-      <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Cód</th><th>Descripción</th><th>USD/kg</th><th>ARS/kg</th></tr></thead><tbody>
-        ${S.pet.insumos.map((m,i)=>`<tr><td><span class="chip">${m.cod}</span></td><td style="white-space:normal">${m.desc}<br><span class="note">${m.tipo}</span></td>
-          <td>${nInp(`pet.insumos.${i}.usd`,m.usd,{w:80})}</td><td class="num">${ars(m.usd*TC())}</td></tr>`).join('')}
-      </tbody></table></div></div>
+    body=`
+    <div class="grid g4" style="margin-bottom:16px">
+      <div class="card stat accent"><div class="k">Costo proceso c/flete</div><div class="v">${usd(proc.totalCFlete,3)}<small>/kg</small></div><div class="d">${ars(proc.totalCFlete*tc)}/kg</div></div>
+      <div class="card stat"><div class="k">Costo proceso s/flete</div><div class="v">${usd(proc.totalSFlete,3)}<small>/kg</small></div><div class="d">cliente retira</div></div>
+      <div class="card stat"><div class="k">Variante más barata</div><div class="v" style="font-size:20px">${usd(Math.min.apply(null,vr.map(v=>v.cFlete)),2)}</div><div class="d">${vr.reduce((m,v)=>v.cFlete<m.cFlete?v:m,vr[0]).nom}</div></div>
+      <div class="card stat"><div class="k">Variante más cara</div><div class="v" style="font-size:20px">${usd(Math.max.apply(null,vr.map(v=>v.cFlete)),2)}</div><div class="d">${vr.reduce((m,v)=>v.cFlete>m.cFlete?v:m,vr[0]).nom}</div></div>
     </div>
+
+    <div style="margin-bottom:16px">${anatomyCard('Anatomía del costo de procesamiento',parts,'Total procesamiento c/flete',{tag:`merma neta ${pct(p.merma-p.recuperacion,0)} · TC ${ars(tc)}`,dec:4})}</div>
+
+    ${matrix}
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-h"><h3>Costo final por variante</h3><span class="tag">MP ajustada + procesamiento</span></div>
+      <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+        <th>Variante</th><th>MP base</th><th>× merma</th><th>MP ajust.</th><th>+ Proc. c/flete</th><th>Total c/flete</th><th>Total s/flete</th><th>ARS/kg</th></tr></thead><tbody>
+        ${vr.map(v=>`<tr><td style="text-align:left">${v.nom}</td><td class="num">${usd(v.mpBase,3)}</td>
+          <td class="num">×${factor.toFixed(3)}</td><td class="num">${usd(v.mpAjust,3)}</td>
+          <td class="num">${usd(proc.totalCFlete,3)}</td><td class="num"><b>${usd(v.cFlete,3)}</b></td>
+          <td class="num">${usd(v.sFlete,3)}</td><td class="num">${ars(v.arsC)}</td></tr>`).join('')}
+      </tbody></table></div></div></div>
+
+    <div class="grid g2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-h"><h3>Insumos / Materias primas</h3><span class="tag">editá USD/kg</span></div>
+        <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Cód</th><th>Descripción</th><th>USD/kg</th><th>ARS/kg</th></tr></thead><tbody>
+          ${S.pet.insumos.map((m,i)=>`<tr><td><span class="chip">${m.cod}</span></td><td style="white-space:normal;text-align:left">${m.desc}<br><span class="note">${m.tipo}</span></td>
+            <td>${nInp(`pet.insumos.${i}.usd`,m.usd,{w:80})}</td><td class="num">${ars(m.usd*tc)}</td></tr>`).join('')}
+        </tbody></table></div></div></div>
+      <div class="card">
+        <div class="card-h"><h3>Parámetros del costo</h3><span class="tag">tocá y recalcula</span></div>
+        <div class="card-b"><div class="params-grid">
+          <div class="params-sub">Proceso</div>
+          ${field('pet.params.energia',p.energia,'Energía',{unit:'USD/kg'})}
+          ${field('pet.params.valorHora',p.valorHora,'Valor hora MO',{unit:'ARS/h'})}
+          ${field('pet.params.operarios',p.operarios,'Operarios/turno',{unit:'pers'})}
+          ${field('pet.params.cargas',p.cargas,'Cargas sociales',{unit:'×'})}
+          ${field('pet.params.prodHora',p.prodHora,'Producción',{unit:'kg/h'})}
+          ${field('pet.params.merma',(p.merma*100),'Merma proceso',{type:'pctnum',unit:'%'})}
+          ${field('pet.params.recuperacion',(p.recuperacion*100),'Recuperación',{type:'pctnum',unit:'%'})}
+          ${field('pet.params.otrosVarios',p.otrosVarios,'Otros varios',{unit:'USD/kg'})}
+          ${field('pet.params.otrosIndirectos',p.otrosIndirectos,'Otros indirectos',{unit:'USD/kg'})}
+          <div class="params-sub">Packaging y logística</div>
+          ${field('pet.params.conoARSkg',p.conoARSkg,'Cono',{unit:'ARS/kg'})}
+          ${field('pet.params.conoKgBobina',p.conoKgBobina,'Cono kg/bobina',{unit:'kg'})}
+          ${field('pet.params.kgBobinaProd',p.kgBobinaProd,'Kg bobina prod.',{unit:'kg'})}
+          ${field('pet.params.palletARS',p.palletARS,'Pallet',{unit:'ARS'})}
+          ${field('pet.params.palletCap',p.palletCap,'Pallet capacidad',{unit:'kg'})}
+          ${field('pet.params.stretchPct',(p.stretchPct*100),'Stretch+etiq.',{type:'pctnum',unit:'%'})}
+          ${field('pet.params.fletePallet',p.fletePallet,'Flete x pallet',{unit:'ARS'})}
+          ${field('pet.params.pctFlete',(p.pctFlete*100),'% flete Winflex',{type:'pctnum',unit:'%'})}
+        </div></div></div>
+    </div>`;
+  } else {
+    const filt=rows.filter(r=>!petSearch||r.cli.toLowerCase().includes(petSearch.toLowerCase()));
+    const avgNeto=rows.reduce((a,r)=>a+r.margenNeto,0)/(rows.length||1);
+    const avgBruto=rows.reduce((a,r)=>a+r.margenBruto,0)/(rows.length||1);
+    const opts=S.pet.variantes.map((v,i)=>({v:i,t:v.nom}));
+    body=`
+    <div class="grid g4" style="margin-bottom:16px">
+      <div class="card stat accent"><div class="k">Margen neto prom.</div><div class="v">${pct(avgNeto,1)}</div><div class="d">después de gastos + Ganancias</div></div>
+      <div class="card stat"><div class="k">Margen bruto prom.</div><div class="v">${pct(avgBruto,1)}</div><div class="d">precio − costo</div></div>
+      <div class="card stat"><div class="k">Precio prom.</div><div class="v">${usd(rows.reduce((a,r)=>a+r.precio,0)/(rows.length||1),2)}<small>/kg</small></div><div class="d">lista vigente</div></div>
+      <div class="card stat"><div class="k">Costo prom.</div><div class="v">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}<small>/kg</small></div><div class="d">según variante</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-h"><h3>Lista de precios por cliente</h3>
+        <input class="search" id="petSearchI" placeholder="Buscar cliente…" value="${petSearch}" style="margin-left:auto">
+        <button class="btn sm primary" id="petAdd" style="margin-left:8px">+ Cliente</button></div>
+      <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+        <th>Cliente</th><th>Variante</th><th>P. ant.</th><th>P. act.</th><th>Aum.</th><th>Costo</th><th>M.Bruto</th><th>M.Neto USD</th><th>M.Neto%</th><th>Estado</th><th></th></tr></thead><tbody>
+        ${filt.map(r=>{ const s=semaforo(r.margenNeto); const ar=r.aumento;
+          return `<tr>
+          <td><input class="tinp" style="max-width:130px;text-align:left;font-family:'IBM Plex Sans'" data-path="pet.clientes.${r.i}.cli" value="${r.cli}"></td>
+          <td><select class="tsel" data-path="pet.clientes.${r.i}.v">${opts.map(o=>`<option value="${o.v}" ${o.v==r.v?'selected':''}>${o.t}</option>`).join('')}</select></td>
+          <td>${nInp(`pet.clientes.${r.i}.ant`,r.ant,{w:78})}</td>
+          <td>${nInp(`pet.clientes.${r.i}.act`,r.act,{w:78})}</td>
+          <td class="num delta ${ar>0.0001?'up':ar<-0.0001?'down':'flat'}">${ar>0?'+':''}${pct(ar,1)}</td>
+          <td class="num">${usd(r.costo,2)}</td>
+          <td class="num">${pct(r.margenBruto,1)}</td>
+          <td class="num">${usd(r.netoUSD,2)}</td>
+          <td class="num"><b>${pct(r.margenNeto,1)}</b></td>
+          <td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td>
+          <td class="row-actions"><button class="mini-x" data-del-pet="${r.i}">✕</button></td></tr>`;}).join('')}
+      </tbody>
+      <tr class="total"><td>PROMEDIO</td><td></td><td></td><td class="num">${usd(rows.reduce((a,r)=>a+r.act,0)/(rows.length||1),2)}</td><td></td>
+        <td class="num">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}</td><td class="num">${pct(avgBruto,1)}</td><td></td><td class="num">${pct(avgNeto,1)}</td><td></td><td></td></tr>
+      </table></div></div></div>
+
     <div class="card">
-      <div class="card-h"><h3>Parámetros del cálculo neto</h3></div>
+      <div class="card-h"><h3>Parámetros del margen neto</h3><span class="tag">% sobre venta</span></div>
       <div class="card-b"><div class="params-grid">
-        ${field('pet.net.admin',(n.admin*100),'Admin no cargado','%',{type:'pctnum',unit:'%',sub:'Oficina, contabilidad, sistemas'})}
+        ${field('pet.net.admin',(n.admin*100),'Admin no cargado',{type:'pctnum',unit:'%',sub:'Oficina, contabilidad, sistemas'})}
         ${field('pet.net.iibb',(n.iibb*100),'IIBB s/ventas',{type:'pctnum',unit:'%'})}
         ${field('pet.net.dyc',(n.dyc*100),'Déb. y Créd. + otros',{type:'pctnum',unit:'%'})}
         ${field('pet.net.financiero',(n.financiero*100),'Gastos financieros',{type:'pctnum',unit:'%'})}
         ${field('pet.net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%'})}
-      </div></div>
-    </div>
-  </div>
+      </div></div></div>`;
+  }
 
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-h"><h3>Lista de precios por cliente</h3>
-      <input class="search" id="petSearchI" placeholder="Buscar cliente…" value="${petSearch}" style="margin-left:auto">
-      <button class="btn sm primary" id="petAdd" style="margin-left:8px">+ Cliente</button></div>
-    <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-      <th>Cliente</th><th>Variante</th><th>P. ant.</th><th>P. act.</th><th>Aum.</th><th>Costo</th><th>M.Bruto</th><th>M.Neto USD</th><th>M.Neto%</th><th>Estado</th><th></th></tr></thead><tbody>
-      ${filt.map(r=>{ const s=semaforo(r.margenNeto); const ar=r.aumento;
-        return `<tr>
-        <td><input class="tinp" style="max-width:130px;text-align:left;font-family:'IBM Plex Sans'" data-path="pet.clientes.${r.i}.cli" value="${r.cli}"></td>
-        <td><select class="tsel" data-path="pet.clientes.${r.i}.v">${opts.map(o=>`<option value="${o.v}" ${o.v==r.v?'selected':''}>${o.t}</option>`).join('')}</select></td>
-        <td>${nInp(`pet.clientes.${r.i}.ant`,r.ant,{w:78})}</td>
-        <td>${nInp(`pet.clientes.${r.i}.act`,r.act,{w:78})}</td>
-        <td class="num delta ${ar>0.0001?'up':ar<-0.0001?'down':'flat'}">${ar>0?'+':''}${pct(ar,1)}</td>
-        <td class="num">${usd(r.costo,2)}</td>
-        <td class="num">${pct(r.margenBruto,1)}</td>
-        <td class="num">${usd(r.netoUSD,2)}</td>
-        <td class="num"><b>${pct(r.margenNeto,1)}</b></td>
-        <td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td>
-        <td class="row-actions"><button class="mini-x" data-del-pet="${r.i}">✕</button></td></tr>`;}).join('')}
-    </tbody>
-    <tr class="total"><td>PROMEDIO</td><td></td><td></td><td class="num">${usd(rows.reduce((a,r)=>a+r.act,0)/(rows.length||1),2)}</td><td></td>
-      <td class="num">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}</td><td class="num">${pct(avgBruto,1)}</td><td></td><td class="num">${pct(avgNeto,1)}</td><td></td><td></td></tr>
-    </table></div></div>
-  </div>`;
-
-  $('#petSearchI').oninput=e=>{petSearch=e.target.value; const w=$('#petSearchI');};
-  $('#petSearchI').onchange=e=>{petSearch=e.target.value;renderPET();};
-  $('#petAdd').onclick=()=>{ S.pet.clientes.push({cli:'Nuevo cliente',v:0,ant:0,act:0}); commit(); renderPET(); };
+  $('#page-pet').innerHTML=head+body;
+  wireSub('pet',renderPET);
   $('#petExport').onclick=exportPET;
   $('#petSim').onclick=openPetSim;
-  $$('#page-pet [data-del-pet]').forEach(b=>b.onclick=()=>{ S.pet.clientes.splice(+b.dataset.delPet,1); commit(); renderPET(); });
+  if(sub==='precios'){
+    $('#petSearchI').onchange=e=>{petSearch=e.target.value;renderPET();};
+    $('#petAdd').onclick=()=>{ S.pet.clientes.push({cli:'Nuevo cliente',v:0,ant:0,act:0}); commit(); renderPET(); };
+    $$('#page-pet [data-del-pet]').forEach(b=>b.onclick=()=>{ S.pet.clientes.splice(+b.dataset.delPet,1); commit(); renderPET(); });
+  }
 }
 
 /* ============================================================
-   MÓDULO FILM PE
+   MÓDULO FILM PE (insumo interno · solo costos)
    ============================================================ */
 function renderPE(){
-  const c=calcPE(), p=S.pe.params;
+  const c=calcPE(), p=S.pe.params, tc=TC();
   const insOpts=S.pe.insumos.map(i=>({v:i.cod,t:i.cod+' · '+i.desc}));
   const sumMix=S.pe.receta.reduce((a,r)=>a+r.p,0);
   const parts=[
-    {label:'Materia prima',val:c.mpAjust,color:'var(--amber)'},
-    {label:'Mano de obra',val:c.MO,color:'var(--teal)'},
-    {label:'Energía',val:c.energia,color:'var(--blue)'},
-    {label:'Otros + indirectos',val:c.otros+c.indirectos,color:'var(--muted)'}
+    {label:'Materia prima (ajust. merma)',formula:`MP base ${usd(c.mpBase,3)} × factor merma ${c.factor.toFixed(3)}`,usd:c.mpAjust,color:'var(--amber)'},
+    {label:'Mano de obra',formula:`$${nf(p.valorHora)} × ${p.operarios} op × ${p.cargas} cargas ÷ ${p.prodHora} kg/h ÷ TC`,usd:c.MO,color:'var(--teal)'},
+    {label:'Energía',formula:`${p.motores} mot × ${p.consumoMotor} kW × $${p.usdkwh} ÷ ${p.prodHora} kg/h`,usd:c.energia,color:'var(--blue)'},
+    {label:'Otros varios',formula:'directo de parámetros',usd:c.otros,color:'var(--muted)'},
+    {label:'Otros indirectos',formula:'directo de parámetros',usd:c.indirectos,color:'#b8c0bc'}
   ];
   $('#page-pe').innerHTML=`
   <div class="section-head"><div><h2>Film PE</h2><div class="sub">Film de polietileno para laminado PET/PE · insumo interno (no se vende)</div></div>
@@ -852,49 +966,28 @@ function renderPE(){
     <button class="btn" id="peSim">📊 Simulador</button>
     <button class="btn" id="peExport">⬇ Excel</button>
   </div>
-  <div class="banner info">ℹ️ Este film es un insumo de la laminadora; su costo total entra como precio del PE en el módulo Laminado PET/PE.</div>
+  <div class="banner info">ℹ️ Este film es un insumo de la laminadora; no tiene lista de precios. Su costo total entra como precio del PE en el módulo Laminado PET/PE.</div>
 
   <div class="grid g4" style="margin-bottom:16px">
     <div class="card stat accent"><div class="k">Costo total</div><div class="v">${usd(c.total,2)}<small>/kg</small></div><div class="d">${ars(c.totalARS)}/kg</div></div>
-    <div class="card stat"><div class="k">MP ajustada</div><div class="v">${usd(c.mpAjust,2)}<small>/kg</small></div><div class="d">base ${usd(c.mpBase,2)} × merma ${c.factor.toFixed(3)}</div></div>
+    <div class="card stat"><div class="k">MP ajustada</div><div class="v">${usd(c.mpAjust,2)}<small>/kg</small></div><div class="d">base ${usd(c.mpBase,2)} × ${c.factor.toFixed(3)}</div></div>
     <div class="card stat"><div class="k">Procesamiento</div><div class="v">${usd(c.proc,3)}<small>/kg</small></div><div class="d">MO + energía + otros</div></div>
     <div class="card stat"><div class="k">Capacidad línea</div><div class="v">${p.prodHora}<small> kg/h</small></div><div class="d">${p.operarios} operarios/turno</div></div>
   </div>
 
+  <div style="margin-bottom:16px">${anatomyCard('Anatomía del costo',parts,'Costo total por kg',{tag:`merma ${pct(p.merma,0)} · TC ${ars(tc)}`,dec:4})}</div>
+
   <div class="grid g2" style="margin-bottom:16px">
-    <div class="card">
-      <div class="card-h"><h3>Composición del costo</h3></div>
-      <div class="card-b">${breakdownBar(parts)}
-        <div class="tbl-wrap" style="margin-top:14px"><table><tbody>
-          <tr><td>Materia prima (ajust. merma)</td><td class="num">${usd(c.mpAjust,3)}</td><td class="num">${ars(c.mpAjust*TC())}</td></tr>
-          <tr><td>Mano de obra</td><td class="num">${usd(c.MO,3)}</td><td class="num">${ars(c.MO*TC())}</td></tr>
-          <tr><td>Energía</td><td class="num">${usd(c.energia,3)}</td><td class="num">${ars(c.energia*TC())}</td></tr>
-          <tr><td>Otros + indirectos</td><td class="num">${usd(c.otros+c.indirectos,3)}</td><td class="num">${ars((c.otros+c.indirectos)*TC())}</td></tr>
-          <tr class="total"><td>TOTAL</td><td class="num">${usd(c.total,3)}</td><td class="num">${ars(c.totalARS)}</td></tr>
-        </tbody></table></div></div>
-    </div>
     <div class="card">
       <div class="card-h"><h3>Receta de mezcla</h3><span class="tag" style="color:${Math.abs(sumMix-1)<0.001?'var(--green)':'var(--red)'}">suma ${pct(sumMix,0)}</span></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Insumo</th><th>% mezcla</th><th>USD/kg</th><th>Aporte</th></tr></thead><tbody>
         ${S.pe.receta.map((r,i)=>{ const ins=S.pe.insumos.find(x=>x.cod===r.cod)||{};
-          return `<tr><td><select class="tsel" data-path="pe.receta.${i}.cod">${insOpts.map(o=>`<option value="${o.v}" ${o.v===r.cod?'selected':''}>${o.t}</option>`).join('')}</select></td>
+          return `<tr><td style="text-align:left"><select class="tsel" data-path="pe.receta.${i}.cod">${insOpts.map(o=>`<option value="${o.v}" ${o.v===r.cod?'selected':''}>${o.t}</option>`).join('')}</select></td>
           <td>${nInp(`pe.receta.${i}.p`,r.p,{w:60})}</td><td class="num">${usd(ins.usd||0,2)}</td><td class="num">${usd(r.p*(ins.usd||0),3)}</td></tr>`;}).join('')}
       </tbody></table></div>
-      <div class="note" style="margin-top:8px">El % de mezcla debe sumar 100%. Merma del proceso: ${pct(p.merma,0)}.</div></div>
-    </div>
-  </div>
-
-  <div class="grid g2" style="margin-bottom:16px">
+      <div class="note" style="margin-top:8px">El % de mezcla debe sumar 100%. Merma del proceso: ${pct(p.merma,0)}.</div></div></div>
     <div class="card">
-      <div class="card-h"><h3>Catálogo de insumos PE</h3><span class="tag">editá USD/kg</span></div>
-      <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Cód</th><th>Descripción</th><th>Prov.</th><th>USD/kg</th><th>ARS/kg</th><th>Act.</th></tr></thead><tbody>
-        ${S.pe.insumos.map((m,i)=>`<tr><td><span class="chip">${m.cod}</span></td><td style="white-space:normal">${m.desc}</td><td>${m.prov}</td>
-          <td>${nInp(`pe.insumos.${i}.usd`,m.usd,{w:70})}</td><td class="num">${ars(m.usd*TC())}</td>
-          <td><input class="tinp" style="max-width:96px;text-align:left;font-family:'IBM Plex Sans'" data-path="pe.insumos.${i}.upd" value="${m.upd}"></td></tr>`).join('')}
-      </tbody></table></div></div>
-    </div>
-    <div class="card">
-      <div class="card-h"><h3>Parámetros</h3></div>
+      <div class="card-h"><h3>Parámetros del costo</h3><span class="tag">tocá y recalcula</span></div>
       <div class="card-b"><div class="params-grid">
         ${field('pe.params.valorHora',p.valorHora,'Valor hora MO',{unit:'ARS/h'})}
         ${field('pe.params.cargas',p.cargas,'Cargas sociales',{unit:'×'})}
@@ -906,9 +999,16 @@ function renderPE(){
         ${field('pe.params.merma',(p.merma*100),'Merma proceso',{type:'pctnum',unit:'%'})}
         ${field('pe.params.otrosVarios',p.otrosVarios,'Otros varios',{unit:'USD/kg'})}
         ${field('pe.params.otrosIndirectos',p.otrosIndirectos,'Otros indirectos',{unit:'USD/kg'})}
-      </div></div>
-    </div>
-  </div>`;
+      </div></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><h3>Catálogo de insumos PE</h3><span class="tag">editá USD/kg</span></div>
+    <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Cód</th><th>Descripción</th><th>Prov.</th><th>USD/kg</th><th>ARS/kg</th><th>Act.</th></tr></thead><tbody>
+      ${S.pe.insumos.map((m,i)=>`<tr><td><span class="chip">${m.cod}</span></td><td style="white-space:normal;text-align:left">${m.desc}</td><td style="text-align:left">${m.prov}</td>
+        <td>${nInp(`pe.insumos.${i}.usd`,m.usd,{w:70})}</td><td class="num">${ars(m.usd*tc)}</td>
+        <td><input class="tinp" style="max-width:96px;text-align:left;font-family:'IBM Plex Sans'" data-path="pe.insumos.${i}.upd" value="${m.upd}"></td></tr>`).join('')}
+    </tbody></table></div></div></div>`;
   $('#peExport').onclick=exportPE;
   $('#peSim').onclick=openPeSim;
 }
@@ -917,192 +1017,238 @@ function renderPE(){
    MÓDULO LAMINADO PET/PE
    ============================================================ */
 function renderPETPE(){
-  const proc=petpeProc(), p=S.petpe.params, n=S.petpe.net;
+  const proc=petpeProc(), p=S.petpe.params, n=S.petpe.net, tc=TC();
   const rows=S.petpe.productos.map((pr,i)=>({...petpeRow(pr),i}));
-  const avgNeto=rows.reduce((a,r)=>a+r.margenNeto,0)/(rows.length||1);
-  const avgBruto=rows.reduce((a,r)=>a+r.margenBruto,0)/(rows.length||1);
   const cPET=petpeCostPET(), cPE=petpeCostPE();
+  const sub=subTab.petpe;
 
-  $('#page-petpe').innerHTML=`
-  <div class="section-head"><div><h2>Laminado PET/PE</h2><div class="sub">Lámina rPET + film PE laminados y refilados · ${rows.length} productos</div></div>
+  const head=`<div class="section-head"><div><h2>Laminado PET/PE</h2><div class="sub">Lámina rPET + film PE laminados y refilados · ${rows.length} productos</div></div>
     <div class="sh-spacer"></div>
     <button class="btn" id="ppSim">📊 Simulador</button>
     <button class="btn" id="ppExport">⬇ Excel</button>
   </div>
+  ${subnav('petpe',[{id:'costos',label:'🧮 Costos'},{id:'precios',label:'🏷️ Precios'}])}`;
 
-  <div class="grid g4" style="margin-bottom:16px">
-    <div class="card stat accent"><div class="k">Margen neto prom.</div><div class="v">${pct(avgNeto,1)}</div><div class="d">${rows.length} productos</div></div>
-    <div class="card stat"><div class="k">Margen bruto prom.</div><div class="v">${pct(avgBruto,1)}</div></div>
-    <div class="card stat"><div class="k">Costo proceso</div><div class="v">${usd(proc.procKg,3)}<small>/kg</small></div><div class="d">laminado ${usd(proc.subLam,3)} + refilado ${usd(proc.subRef,3)}</div></div>
-    <div class="card stat"><div class="k">Insumos lámina</div><div class="v" style="font-size:18px">PET ${usd(cPET,2)}<br>PE ${usd(cPE,2)}</div><div class="d">USD/kg</div></div>
-  </div>
-
-  <div class="grid g2" style="margin-bottom:16px">
-    <div class="card">
-      <div class="card-h"><h3>Costo del proceso (laminado + refilado)</h3></div>
-      <div class="card-b"><div class="tbl-wrap"><table><tbody>
-        <tr><td>Adhesivos + diluyente</td><td class="num">${usd(proc.adhes,4)}</td></tr>
-        <tr><td>MO laminado</td><td class="num">${usd(proc.MOlam,4)}</td></tr>
-        <tr><td>Energía laminado</td><td class="num">${usd(proc.enerLam,4)}</td></tr>
-        <tr><td>MO refilado</td><td class="num">${usd(proc.MOref,4)}</td></tr>
-        <tr><td>Energía refilado</td><td class="num">${usd(proc.enerRef,4)}</td></tr>
-        <tr><td>Otros refilado</td><td class="num">${usd(proc.otrosRef,4)}</td></tr>
-        <tr class="total"><td>Total por kg que pasa por la línea</td><td class="num">${usd(proc.procKg,4)}</td></tr>
+  let body;
+  if(sub==='costos'){
+    const procParts=[
+      {label:'Adhesivos',val:proc.adhes,color:'var(--amber)'},
+      {label:'MO laminado',val:proc.MOlam,color:'var(--teal)'},
+      {label:'Energía lam.',val:proc.enerLam,color:'var(--blue)'},
+      {label:'MO refilado',val:proc.MOref,color:'var(--teal-d)'},
+      {label:'Energía ref.',val:proc.enerRef,color:'#2c74c4'},
+      {label:'Otros refilado',val:proc.otrosRef,color:'var(--muted)'}
+    ];
+    const procCard=`<div class="card"><div class="card-h"><h3>Anatomía del costo de proceso</h3><span class="tag">por kg que pasa por la línea · TC ${ars(tc)}</span></div>
+      <div class="card-b">${breakdownBar(procParts)}
+      <div class="tbl-wrap" style="margin-top:14px"><table><tbody>
+        <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">LAMINADO</td><td></td><td class="num">${usd(proc.subLam,4)}</td></tr>
+        <tr><td style="text-align:left"><b>Adhesivos + diluyente</b><span class="formula">suma de aportes (ver tabla adhesivos)</span></td><td class="num formula">${usd(proc.adhes,4)}</td><td class="num">${ars(proc.adhes*tc)}</td></tr>
+        <tr><td style="text-align:left"><b>MO laminado</b><span class="formula">$${nf(p.salLam)} × ${p.opLam} × ${p.cargasLam} ÷ ${p.prodLam} kg/h ÷ TC</span></td><td class="num formula">${usd(proc.MOlam,4)}</td><td class="num">${ars(proc.MOlam*tc)}</td></tr>
+        <tr><td style="text-align:left"><b>Energía laminado</b><span class="formula">${p.motoresLam} mot × ${p.consumoLam} kW × $${p.usdkwhLam} ÷ ${p.prodLam} kg/h</span></td><td class="num formula">${usd(proc.enerLam,4)}</td><td class="num">${ars(proc.enerLam*tc)}</td></tr>
+        <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">REFILADO</td><td></td><td class="num">${usd(proc.subRef,4)}</td></tr>
+        <tr><td style="text-align:left"><b>MO refilado</b><span class="formula">$${nf(p.salRef)} × ${p.opRef} × ${p.cargasRef} ÷ ${p.prodRef} kg/h ÷ TC</span></td><td class="num formula">${usd(proc.MOref,4)}</td><td class="num">${ars(proc.MOref*tc)}</td></tr>
+        <tr><td style="text-align:left"><b>Energía refilado</b><span class="formula">${p.motoresRef} mot × ${p.consumoRef} kW × $${p.usdkwhRef} ÷ ${p.prodRef} kg/h</span></td><td class="num formula">${usd(proc.enerRef,4)}</td><td class="num">${ars(proc.enerRef*tc)}</td></tr>
+        <tr><td style="text-align:left"><b>Otros refilado</b><span class="formula">directo de parámetros</span></td><td class="num formula">${usd(proc.otrosRef,4)}</td><td class="num">${ars(proc.otrosRef*tc)}</td></tr>
+        <tr class="total"><td style="text-align:left">TOTAL PROCESO POR KG</td><td></td><td class="num">${usd(proc.procKg,4)}</td></tr>
       </tbody></table></div>
-      <div class="note" style="margin-top:8px">Se aplica sobre los <b>kg brutos</b> (PET+PE que entran), no sobre el kg final.</div></div>
+      <div class="note" style="margin-top:8px">Se aplica sobre los <b>kg brutos</b> (PET+PE que entran al laminador), no sobre el kg final producido.</div></div></div>`;
+
+    const prodCost=`<div class="card" style="margin-bottom:16px">
+      <div class="card-h"><h3>Costo por producto</h3><button class="btn sm primary" id="ppAdd" style="margin-left:auto">+ Producto</button></div>
+      <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+        <th>Cliente</th><th>Medida</th><th>Ancho PET</th><th>Esp PET</th><th>Ancho PE</th><th>Esp PE</th><th>Ancho fin</th><th>Tiras</th><th>Costo</th><th></th><th></th></tr></thead><tbody>
+        ${rows.map(r=>{ const open=ppExp.has(r.i);
+          return `<tr>
+          <td><input class="tinp" style="max-width:110px;text-align:left;font-family:'IBM Plex Sans'" data-path="petpe.productos.${r.i}.cli" value="${r.cli}"></td>
+          <td><input class="tinp" style="max-width:78px;text-align:left;font-family:'IBM Plex Mono'" data-path="petpe.productos.${r.i}.med" value="${r.med}"></td>
+          <td>${nInp(`petpe.productos.${r.i}.aPET`,r.aPET,{w:60})}</td>
+          <td>${nInp(`petpe.productos.${r.i}.ePET`,r.ePET,{w:54})}</td>
+          <td>${nInp(`petpe.productos.${r.i}.aPE`,r.aPE,{w:60})}</td>
+          <td>${nInp(`petpe.productos.${r.i}.ePE`,r.ePE,{w:54})}</td>
+          <td>${nInp(`petpe.productos.${r.i}.aFin`,r.aFin,{w:60})}</td>
+          <td>${nInp(`petpe.productos.${r.i}.tiras`,r.tiras,{w:42})}</td>
+          <td class="num"><b>${usd(r.costo,3)}</b></td>
+          <td><span class="lnk" data-exp="${r.i}">${open?'ocultar ▲':'desglose ▼'}</span></td>
+          <td class="row-actions"><button class="mini-x" data-del-pp="${r.i}">✕</button></td></tr>
+          ${open?`<tr class="exp-row"><td colspan="11"><div class="exp-grid">
+            <div class="ei">Gramaje PET<b>${r.gPET.toFixed(1)} g/m²</b><span class="ef">${r.ePET}µm × ${p.densPET}</span></div>
+            <div class="ei">Gramaje PE<b>${r.gPE.toFixed(1)} g/m²</b><span class="ef">${r.ePE}µm × ${p.densPE}</span></div>
+            <div class="ei">% PET / % PE<b>${pct(r.pPET,0)} / ${pct(r.pPE,0)}</b><span class="ef">por peso</span></div>
+            <div class="ei">Yield PET / PE<b>${pct(r.yPET,1)} / ${pct(r.yPE,1)}</b><span class="ef">(ancho fin × tiras) ÷ ancho bobina</span></div>
+            <div class="ei">kg PET bruto<b>${r.kgPET.toFixed(3)}</b><span class="ef">% PET ÷ yield PET</span></div>
+            <div class="ei">kg PE bruto<b>${r.kgPE.toFixed(3)}</b><span class="ef">% PE ÷ yield PE</span></div>
+            <div class="ei">Costo PET<b>${usd(r.cPET,3)}</b><span class="ef">${r.kgPET.toFixed(3)} kg × ${usd(cPET,2)}</span></div>
+            <div class="ei">Costo PE<b>${usd(r.cPE,3)}</b><span class="ef">${r.kgPE.toFixed(3)} kg × ${usd(cPE,2)}</span></div>
+            <div class="ei">Costo proceso<b>${usd(r.cProc,3)}</b><span class="ef">${r.kgTot.toFixed(3)} kg × ${usd(proc.procKg,3)}</span></div>
+            <div class="ei">Costo total<b style="color:var(--teal)">${usd(r.costo,3)}</b><span class="ef">${ars(r.costo*tc)}/kg</span></div>
+          </div></td></tr>`:''}`;}).join('')}
+      </tbody></table></div>
+      <div class="note" style="margin-top:8px">Editá anchos de bobina, espesores y tiras. Tocá “desglose” para ver cómo se arma el costo de cada producto paso a paso.</div></div></div>`;
+
+    body=`
+    <div class="grid g4" style="margin-bottom:16px">
+      <div class="card stat accent"><div class="k">Costo proceso</div><div class="v">${usd(proc.procKg,3)}<small>/kg</small></div><div class="d">lam ${usd(proc.subLam,3)} + ref ${usd(proc.subRef,3)}</div></div>
+      <div class="card stat"><div class="k">Insumo lámina rPET</div><div class="v">${usd(cPET,2)}<small>/kg</small></div><div class="d">${p.linkPET?'vinculado a PET':'manual'}</div></div>
+      <div class="card stat"><div class="k">Insumo film PE</div><div class="v">${usd(cPE,2)}<small>/kg</small></div><div class="d">${p.linkPE?'vinculado a Film PE':'manual'}</div></div>
+      <div class="card stat"><div class="k">Costo prom. producto</div><div class="v">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}<small>/kg</small></div><div class="d">${rows.length} productos</div></div>
     </div>
+
+    <div style="margin-bottom:16px">${procCard}</div>
+
+    ${prodCost}
+
+    <div class="grid g2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-h"><h3>Insumos lámina &amp; adhesivos</h3></div>
+        <div class="card-b">
+          <div class="params-grid" style="grid-template-columns:1fr 1fr">
+            ${field('petpe.params.costoLaminaPET',p.costoLaminaPET,'Costo lámina rPET',{unit:'USD/kg',sub:'con flete Lanús→Chivilcoy'})}
+            ${field('petpe.params.costoLaminaPE',p.costoLaminaPE,'Costo lámina PE',{unit:'USD/kg'})}
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);margin:2px 0 6px">
+            <input type="checkbox" data-link="linkPET" ${p.linkPET?'checked':''}> Vincular costo rPET al módulo PET (rPET Cristal c/flete = ${usd(petVariantes()[0].cFlete,3)})</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);margin-bottom:10px">
+            <input type="checkbox" data-link="linkPE" ${p.linkPE?'checked':''}> Vincular costo PE al módulo Film PE (= ${usd(calcPE().total,3)})</label>
+          <div class="tbl-wrap"><table><thead><tr><th>Adhesivo</th><th>USD/kg</th><th>% aplic.</th><th>Aporte</th></tr></thead><tbody>
+            ${S.petpe.adhesivos.map((a,i)=>`<tr><td style="white-space:normal;text-align:left">${a.nom}</td><td>${nInp(`petpe.adhesivos.${i}.usd`,a.usd,{w:60})}</td>
+              <td>${nInp(`petpe.adhesivos.${i}.pct`,a.pct,{w:64})}</td><td class="num">${usd(a.usd*a.pct,4)}</td></tr>`).join('')}
+          </tbody></table></div></div></div>
+      <div class="card">
+        <div class="card-h"><h3>Parámetros del proceso</h3><span class="tag">tocá y recalcula</span></div>
+        <div class="card-b"><div class="params-grid">
+          <div class="params-sub">Laminado</div>
+          ${field('petpe.params.salLam',p.salLam,'Salario operario',{unit:'ARS/h'})}
+          ${field('petpe.params.opLam',p.opLam,'Operarios',{unit:'pers'})}
+          ${field('petpe.params.cargasLam',p.cargasLam,'Cargas',{unit:'×'})}
+          ${field('petpe.params.prodLam',p.prodLam,'Producción',{unit:'kg/h'})}
+          ${field('petpe.params.motoresLam',p.motoresLam,'Motores',{unit:'u'})}
+          ${field('petpe.params.consumoLam',p.consumoLam,'Consumo/motor',{unit:'kW/h'})}
+          ${field('petpe.params.usdkwhLam',p.usdkwhLam,'Costo energía',{unit:'USD/kWh'})}
+          <div class="params-sub">Refilado</div>
+          ${field('petpe.params.salRef',p.salRef,'Salario operario',{unit:'ARS/h'})}
+          ${field('petpe.params.opRef',p.opRef,'Operarios',{unit:'pers'})}
+          ${field('petpe.params.cargasRef',p.cargasRef,'Cargas',{unit:'×'})}
+          ${field('petpe.params.prodRef',p.prodRef,'Producción',{unit:'kg/h'})}
+          ${field('petpe.params.motoresRef',p.motoresRef,'Motores',{unit:'u'})}
+          ${field('petpe.params.otrosRef',p.otrosRef,'Otros gastos',{unit:'USD/kg'})}
+          <div class="params-sub">Constantes físicas</div>
+          ${field('petpe.params.densPET',p.densPET,'Densidad PET',{unit:'g/cm³'})}
+          ${field('petpe.params.densPE',p.densPE,'Densidad PE',{unit:'g/cm³'})}
+        </div></div></div>
+    </div>`;
+  } else {
+    const avgNeto=rows.reduce((a,r)=>a+r.margenNeto,0)/(rows.length||1);
+    const avgBruto=rows.reduce((a,r)=>a+r.margenBruto,0)/(rows.length||1);
+    body=`
+    <div class="grid g4" style="margin-bottom:16px">
+      <div class="card stat accent"><div class="k">Margen neto prom.</div><div class="v">${pct(avgNeto,1)}</div><div class="d">${rows.length} productos</div></div>
+      <div class="card stat"><div class="k">Margen bruto prom.</div><div class="v">${pct(avgBruto,1)}</div><div class="d">precio − costo</div></div>
+      <div class="card stat"><div class="k">Precio prom.</div><div class="v">${usd(rows.reduce((a,r)=>a+r.precio,0)/(rows.length||1),2)}<small>/kg</small></div><div class="d">lista vigente</div></div>
+      <div class="card stat"><div class="k">Costo prom.</div><div class="v">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}<small>/kg</small></div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-h"><h3>Precios por producto / cliente</h3><button class="btn sm primary" id="ppAdd" style="margin-left:auto">+ Producto</button></div>
+      <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+        <th>Cliente</th><th>Medida</th><th>Costo</th><th>Precio</th><th>M.Bruto</th><th>M.Neto USD</th><th>M.Neto%</th><th>Estado</th><th></th></tr></thead><tbody>
+        ${rows.map(r=>{ const s=semaforo(r.margenNeto);
+          return `<tr>
+          <td style="text-align:left">${r.cli}</td>
+          <td class="num" style="text-align:left">${r.med}</td>
+          <td class="num">${usd(r.costo,2)}</td>
+          <td>${nInp(`petpe.productos.${r.i}.precio`,r.precio,{w:80})}</td>
+          <td class="num">${pct(r.margenBruto,1)}</td>
+          <td class="num">${usd(r.netoUSD,2)}</td>
+          <td class="num"><b>${pct(r.margenNeto,1)}</b></td>
+          <td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td>
+          <td class="row-actions"><button class="mini-x" data-del-pp="${r.i}">✕</button></td></tr>`;}).join('')}
+      </tbody>
+      <tr class="total"><td>PROMEDIO</td><td></td>
+        <td class="num">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}</td>
+        <td class="num">${usd(rows.reduce((a,r)=>a+r.precio,0)/(rows.length||1),2)}</td>
+        <td class="num">${pct(avgBruto,1)}</td><td></td><td class="num">${pct(avgNeto,1)}</td><td></td><td></td></tr>
+      </table></div>
+      <div class="note" style="margin-top:8px">Los anchos, espesores y tiras de cada producto se editan en la solapa Costos.</div></div></div>
+
     <div class="card">
-      <div class="card-h"><h3>Insumos lámina &amp; adhesivos</h3></div>
-      <div class="card-b">
-        <div class="params-grid" style="grid-template-columns:1fr 1fr">
-          ${field('petpe.params.costoLaminaPET',p.costoLaminaPET,'Costo lámina rPET',{unit:'USD/kg',sub:'con flete Lanús→Chivilcoy'})}
-          ${field('petpe.params.costoLaminaPE',p.costoLaminaPE,'Costo lámina PE',{unit:'USD/kg'})}
-        </div>
-        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);margin:2px 0 6px">
-          <input type="checkbox" data-link="linkPET" ${p.linkPET?'checked':''}> Vincular costo rPET al módulo PET (rPET Cristal c/flete = ${usd(petVariantes()[0].cFlete,3)})</label>
-        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);margin-bottom:10px">
-          <input type="checkbox" data-link="linkPE" ${p.linkPE?'checked':''}> Vincular costo PE al módulo Film PE (= ${usd(calcPE().total,3)})</label>
-        <div class="tbl-wrap"><table><thead><tr><th>Adhesivo</th><th>USD/kg</th><th>% aplic.</th><th>Aporte</th></tr></thead><tbody>
-          ${S.petpe.adhesivos.map((a,i)=>`<tr><td style="white-space:normal">${a.nom}</td><td>${nInp(`petpe.adhesivos.${i}.usd`,a.usd,{w:60})}</td>
-            <td>${nInp(`petpe.adhesivos.${i}.pct`,a.pct,{w:64})}</td><td class="num">${usd(a.usd*a.pct,4)}</td></tr>`).join('')}
-        </tbody></table></div></div>
-    </div>
-  </div>
+      <div class="card-h"><h3>Parámetros del margen neto</h3><span class="tag">% sobre venta</span></div>
+      <div class="card-b"><div class="params-grid">
+        ${field('petpe.net.admin',(n.admin*100),'Admin',{type:'pctnum',unit:'%'})}
+        ${field('petpe.net.iibb',(n.iibb*100),'IIBB',{type:'pctnum',unit:'%'})}
+        ${field('petpe.net.dyc',(n.dyc*100),'DyC + otros',{type:'pctnum',unit:'%'})}
+        ${field('petpe.net.financiero',(n.financiero*100),'Financieros',{type:'pctnum',unit:'%'})}
+        ${field('petpe.net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%'})}
+      </div></div></div>`;
+  }
 
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-h"><h3>Productos / clientes</h3><button class="btn sm primary" id="ppAdd" style="margin-left:auto">+ Producto</button></div>
-    <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-      <th>Cliente</th><th>Medida</th><th>Esp.PET</th><th>Esp.PE</th><th>Tiras</th><th>Yield PET</th><th>Costo</th><th>Precio</th><th>M.Bruto</th><th>M.Neto USD</th><th>M.Neto%</th><th>Estado</th><th></th></tr></thead><tbody>
-      ${rows.map(r=>{ const s=semaforo(r.margenNeto);
-        return `<tr>
-        <td><input class="tinp" style="max-width:120px;text-align:left;font-family:'IBM Plex Sans'" data-path="petpe.productos.${r.i}.cli" value="${r.cli}"></td>
-        <td><input class="tinp" style="max-width:78px;text-align:left;font-family:'IBM Plex Mono'" data-path="petpe.productos.${r.i}.med" value="${r.med}"></td>
-        <td>${nInp(`petpe.productos.${r.i}.ePET`,r.ePET,{w:54})}</td>
-        <td>${nInp(`petpe.productos.${r.i}.ePE`,r.ePE,{w:54})}</td>
-        <td>${nInp(`petpe.productos.${r.i}.tiras`,r.tiras,{w:42})}</td>
-        <td class="num">${pct(r.yPET,0)}</td>
-        <td class="num">${usd(r.costo,2)}</td>
-        <td>${nInp(`petpe.productos.${r.i}.precio`,r.precio,{w:80})}</td>
-        <td class="num">${pct(r.margenBruto,1)}</td>
-        <td class="num">${usd(r.netoUSD,2)}</td>
-        <td class="num"><b>${pct(r.margenNeto,1)}</b></td>
-        <td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td>
-        <td class="row-actions"><button class="mini-x" data-del-pp="${r.i}">✕</button></td></tr>`;}).join('')}
-    </tbody>
-    <tr class="total"><td>PROMEDIO</td><td></td><td></td><td></td><td></td><td></td>
-      <td class="num">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}</td>
-      <td class="num">${usd(rows.reduce((a,r)=>a+r.precio,0)/(rows.length||1),2)}</td>
-      <td class="num">${pct(avgBruto,1)}</td><td></td><td class="num">${pct(avgNeto,1)}</td><td></td><td></td></tr>
-    </table></div>
-    <div class="note" style="margin-top:8px">Las columnas de ancho de bobina y ancho final están en el detalle por producto (editá los anchos en el simulador o en el Excel). Acá editás espesores, tiras y precio.</div></div>
-  </div>
-
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-h"><h3>Parámetros del proceso</h3></div>
-    <div class="card-b"><div class="params-grid">
-      <div class="params-sub">Laminado</div>
-      ${field('petpe.params.salLam',p.salLam,'Salario operario',{unit:'ARS/h'})}
-      ${field('petpe.params.prodLam',p.prodLam,'Producción',{unit:'kg/h'})}
-      ${field('petpe.params.opLam',p.opLam,'Operarios',{unit:'pers'})}
-      ${field('petpe.params.motoresLam',p.motoresLam,'Motores',{unit:'u'})}
-      <div class="params-sub">Refilado</div>
-      ${field('petpe.params.salRef',p.salRef,'Salario operario',{unit:'ARS/h'})}
-      ${field('petpe.params.prodRef',p.prodRef,'Producción',{unit:'kg/h'})}
-      ${field('petpe.params.otrosRef',p.otrosRef,'Otros gastos',{unit:'USD/kg'})}
-      ${field('petpe.params.usdkwhLam',p.usdkwhLam,'Costo energía',{unit:'USD/kWh'})}
-      <div class="params-sub">Gastos sobre venta (margen neto)</div>
-      ${field('petpe.net.admin',(n.admin*100),'Admin',{type:'pctnum',unit:'%'})}
-      ${field('petpe.net.iibb',(n.iibb*100),'IIBB',{type:'pctnum',unit:'%'})}
-      ${field('petpe.net.dyc',(n.dyc*100),'DyC + otros',{type:'pctnum',unit:'%'})}
-      ${field('petpe.net.financiero',(n.financiero*100),'Financieros',{type:'pctnum',unit:'%'})}
-      ${field('petpe.net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%'})}
-    </div></div>
-  </div>`;
-  $('#ppAdd').onclick=()=>{ S.petpe.productos.push({cli:'Nuevo',med:'000x000',aPET:400,ePET:250,aPE:420,ePE:50,aFin:380,tiras:1,precio:3.5}); commit(); renderPETPE(); };
+  $('#page-petpe').innerHTML=head+body;
+  wireSub('petpe',renderPETPE);
   $('#ppExport').onclick=exportPETPE;
   $('#ppSim').onclick=openPpSim;
-  $$('#page-petpe [data-del-pp]').forEach(b=>b.onclick=()=>{ S.petpe.productos.splice(+b.dataset.delPp,1); commit(); renderPETPE(); });
+  if($('#ppAdd')) $('#ppAdd').onclick=()=>{ S.petpe.productos.push({cli:'Nuevo',med:'000x000',aPET:400,ePET:250,aPE:420,ePE:50,aFin:380,tiras:1,precio:3.5}); commit(); renderPETPE(); };
+  $$('#page-petpe [data-del-pp]').forEach(b=>b.onclick=()=>{ S.petpe.productos.splice(+b.dataset.delPp,1); ppExp.clear(); commit(); renderPETPE(); });
   $$('#page-petpe [data-link]').forEach(c=>c.onchange=()=>{ S.petpe.params[c.dataset.link]=c.checked; commit(); renderPETPE(); });
+  $$('#page-petpe [data-exp]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.exp; ppExp.has(i)?ppExp.delete(i):ppExp.add(i); renderPETPE(); });
 }
 
 /* ============================================================
    MÓDULO BANDEJAS
    ============================================================ */
 function renderBandejas(){
-  const p=S.bandejas.params;
+  const p=S.bandejas.params, tc=TC();
   const prods=S.bandejas.productos.map((pr,i)=>({...pr,...bandejaCost(pr),i}));
-  const ensCods=S.bandejas.productos.filter(x=>x.linea==='Ensaladera').map(x=>x.cod);
-  // ensaladeras rows
-  const ensRows=[];
-  S.bandejas.ensaladeras.forEach((e,ei)=>{ ensCods.forEach(cod=>{
-    const val=e.p[cod]; if(val==null)return;
-    const precio=e.mon==='USD'?val:val/TC(); const costo=bandejaCostByCod(cod);
-    const m=precio?(precio-costo)/precio:0;
-    ensRows.push({ei,cli:e.cli,mon:e.mon,cod,val,precio,costo,m}); }); });
-  const ensAvg=ensRows.reduce((a,r)=>a+r.m,0)/(ensRows.length||1);
-  const clamRows=Object.entries(S.bandejas.clamshells).map(([cod,val])=>{
-    const costo=bandejaCostByCod(cod); return {cod,val,costo,m:val?(val-costo)/val:0}; });
-  const clamAvg=clamRows.reduce((a,r)=>a+r.m,0)/(clamRows.length||1);
+  const sub=subTab.bandejas;
+  const clam=prods.filter(x=>x.linea==='Clamshell'), ens=prods.filter(x=>x.linea==='Ensaladera');
 
-  $('#page-bandejas').innerHTML=`
-  <div class="section-head"><div><h2>Bandejas</h2><div class="sub">Termoformado: ${prods.length} productos · ensaladeras + clamshells</div></div>
+  const head=`<div class="section-head"><div><h2>Bandejas</h2><div class="sub">Termoformado: ${prods.length} productos · ensaladeras + clamshells</div></div>
     <div class="sh-spacer"></div>
     <button class="btn" id="bSim">📊 Simulador</button>
     <button class="btn" id="bExport">⬇ Excel</button>
   </div>
+  ${subnav('bandejas',[{id:'costos',label:'🧮 Costos'},{id:'precios',label:'🏷️ Precios'}])}`;
 
-  <div class="grid g4" style="margin-bottom:16px">
-    <div class="card stat accent"><div class="k">Margen ensaladeras</div><div class="v">${pct(ensAvg,1)}</div><div class="d">prom. sobre precio</div></div>
-    <div class="card stat"><div class="k">Margen clamshells</div><div class="v">${pct(clamAvg,1)}</div><div class="d">lista única blueberry</div></div>
-    <div class="card stat"><div class="k">MP rPET interno</div><div class="v">${usd(p.mpCristal,2)}<small>/kg</small></div><div class="d">cristal · negro ${usd(p.mpNegro,2)}</div></div>
-    <div class="card stat"><div class="k">MO termoformado</div><div class="v">${ars(p.salario*p.operarios*(1+p.cargas))}<small>/h</small></div><div class="d">${p.operarios} op × ${pct(p.cargas,0)} cargas</div></div>
-  </div>
-
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-h"><h3>Costo por producto</h3><button class="btn sm primary" id="bAdd" style="margin-left:auto">+ Producto</button></div>
-    <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-      <th>Cód</th><th>Línea</th><th>Mat.</th><th>P.Bruto g</th><th>P.Neto g</th><th>Vel u/h</th><th>MP USD/u</th><th>MO USD/u</th><th>Otros</th><th>USD/millar</th><th></th></tr></thead><tbody>
-      ${prods.map(r=>`<tr>
-        <td><span class="chip teal">${r.cod}</span></td>
-        <td>${r.linea}</td>
-        <td><select class="tsel" data-path="bandejas.productos.${r.i}.mat"><option ${r.mat==='Cristal'?'selected':''}>Cristal</option><option ${r.mat==='Negro'?'selected':''}>Negro</option></select></td>
-        <td>${nInp(`bandejas.productos.${r.i}.bruto`,r.bruto,{w:60})}</td>
-        <td>${nInp(`bandejas.productos.${r.i}.neto`,r.neto,{w:60})}</td>
-        <td>${nInp(`bandejas.productos.${r.i}.vel`,r.vel,{w:64})}</td>
-        <td class="num">${usd(r.cMP,4)}</td>
-        <td class="num">${usd(r.cMO,4)}</td>
-        <td>${nInp(`bandejas.productos.${r.i}.otros`,r.otros,{w:54})}</td>
-        <td class="num"><b>${usd(r.usdMillar,2)}</b></td>
-        <td class="row-actions"><button class="mini-x" data-del-b="${r.i}">✕</button></td></tr>`).join('')}
-    </tbody></table></div></div>
-  </div>
-
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-h"><h3>Ensaladeras · precios por cliente</h3><span class="tag">USD/millar · Bandex en USD, resto ARS</span></div>
-    <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-      <th>Cliente</th><th>Producto</th><th>Moneda</th><th>Precio orig.</th><th>USD/millar</th><th>Costo</th><th>Margen USD</th><th>Margen%</th><th>Estado</th></tr></thead><tbody>
-      ${ensRows.map(r=>{ const s=semaforo(r.m,p.semVerde,p.semAmarillo);
-        return `<tr><td>${r.cli}</td><td><span class="chip">${r.cod}</span></td>
-        <td><select class="tsel" data-path="bandejas.ensaladeras.${r.ei}.mon"><option ${r.mon==='USD'?'selected':''}>USD</option><option ${r.mon==='ARS'?'selected':''}>ARS</option></select></td>
-        <td>${nInp(`bandejas.ensaladeras.${r.ei}.p.${r.cod}`,r.val,{w:84})}</td>
-        <td class="num">${usd(r.precio,2)}</td><td class="num">${usd(r.costo,2)}</td>
-        <td class="num">${usd(r.precio-r.costo,2)}</td><td class="num"><b>${pct(r.m,1)}</b></td>
-        <td><span class="pill ${s}">${semLabel(s)}</span></td></tr>`;}).join('')}
-    </tbody></table></div></div>
-  </div>
-
-  <div class="grid g2" style="margin-bottom:16px">
-    <div class="card">
-      <div class="card-h"><h3>Clamshells · lista única</h3><span class="tag">USD/millar</span></div>
-      <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Precio</th><th>Costo</th><th>Margen USD</th><th>Margen%</th><th>Estado</th></tr></thead><tbody>
-        ${clamRows.map(r=>{ const s=semaforo(r.m,p.semVerde,p.semAmarillo);
-          return `<tr><td><span class="chip teal">${r.cod}</span></td><td>${nInp(`bandejas.clamshells.${r.cod}`,r.val,{w:64})}</td>
-          <td class="num">${usd(r.costo,2)}</td><td class="num">${usd(r.val-r.costo,2)}</td><td class="num"><b>${pct(r.m,1)}</b></td>
-          <td><span class="pill ${s}">${semLabel(s)}</span></td></tr>`;}).join('')}
-      </tbody></table></div></div>
+  let body;
+  if(sub==='costos'){
+    body=`
+    <div class="grid g4" style="margin-bottom:16px">
+      <div class="card stat accent"><div class="k">MP rPET Cristal</div><div class="v">${usd(p.mpCristal,2)}<small>/kg</small></div><div class="d">costo interno · negro ${usd(p.mpNegro,2)}</div></div>
+      <div class="card stat"><div class="k">MO termoformado</div><div class="v">${ars(p.salario*p.operarios*(1+p.cargas))}<small>/h</small></div><div class="d">${p.operarios} op × ${pct(p.cargas,0)} cargas</div></div>
+      <div class="card stat"><div class="k">Costo prom. clamshell</div><div class="v">${usd(clam.reduce((a,r)=>a+r.usdMillar,0)/(clam.length||1),1)}<small>/mil</small></div><div class="d">${clam.length} productos</div></div>
+      <div class="card stat"><div class="k">Costo prom. ensaladera</div><div class="v">${usd(ens.reduce((a,r)=>a+r.usdMillar,0)/(ens.length||1),1)}<small>/mil</small></div><div class="d">${ens.length} productos</div></div>
     </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-h"><h3>Costo por producto</h3><button class="btn sm primary" id="bAdd" style="margin-left:auto">+ Producto</button></div>
+      <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+        <th>Cód</th><th>Línea</th><th>Mat.</th><th>P.Bruto g</th><th>P.Neto g</th><th>Vel u/h</th><th>Otros USD/kg</th><th>USD/millar</th><th></th><th></th></tr></thead><tbody>
+        ${prods.map(r=>{ const open=bExp.has(r.i); const precioMP=r.mat==='Negro'?p.mpNegro:p.mpCristal;
+          return `<tr>
+          <td><span class="chip teal">${r.cod}</span></td>
+          <td style="text-align:left">${r.linea}</td>
+          <td><select class="tsel" data-path="bandejas.productos.${r.i}.mat"><option ${r.mat==='Cristal'?'selected':''}>Cristal</option><option ${r.mat==='Negro'?'selected':''}>Negro</option></select></td>
+          <td>${nInp(`bandejas.productos.${r.i}.bruto`,r.bruto,{w:60})}</td>
+          <td>${nInp(`bandejas.productos.${r.i}.neto`,r.neto,{w:60})}</td>
+          <td>${nInp(`bandejas.productos.${r.i}.vel`,r.vel,{w:64})}</td>
+          <td>${nInp(`bandejas.productos.${r.i}.otros`,r.otros,{w:60})}</td>
+          <td class="num"><b>${usd(r.usdMillar,2)}</b></td>
+          <td><span class="lnk" data-exp="${r.i}">${open?'ocultar ▲':'desglose ▼'}</span></td>
+          <td class="row-actions"><button class="mini-x" data-del-b="${r.i}">✕</button></td></tr>
+          ${open?`<tr class="exp-row"><td colspan="10"><div class="exp-grid">
+            <div class="ei">Desperdicio<b>${r.desp.toFixed(2)} g</b><span class="ef">bruto − neto</span></div>
+            <div class="ei">MP utilizada<b>${(r.mpUtil*1000).toFixed(2)} g/u</b><span class="ef">(neto + desp×(1−recup)) ÷ 1000</span></div>
+            <div class="ei">Costo MP / u<b>${usd(r.cMP,5)}</b><span class="ef">${r.mpUtil.toFixed(5)} kg × ${usd(precioMP,2)}</span></div>
+            <div class="ei">Costo MO / u<b>${usd(r.cMO,5)}</b><span class="ef">$${nf(p.salario*p.operarios*(1+p.cargas))}/h ÷ ${r.vel} u/h ÷ TC</span></div>
+            <div class="ei">Energía / u<b>${usd(r.cEner,5)}</b><span class="ef">MP util × $${p.energia}</span></div>
+            <div class="ei">Otros / u<b>${usd(r.cOtros,5)}</b><span class="ef">MP util × $${r.otros}</span></div>
+            <div class="ei">Costo total / u<b>${usd(r.totalU,5)}</b></div>
+            <div class="ei">Costo / millar<b style="color:var(--teal)">${usd(r.usdMillar,2)}</b><span class="ef">total/u × 1000</span></div>
+          </div></td></tr>`:''}`;}).join('')}
+      </tbody></table></div>
+      <div class="note" style="margin-top:8px">Energía y Otros se aplican sobre la MP utilizada (no sobre el peso bruto). Tocá “desglose” para ver el cálculo unidad por unidad. No incluye empaque ni flete (gasto comercial separado).</div></div></div>
+
     <div class="card">
-      <div class="card-h"><h3>Parámetros</h3></div>
+      <div class="card-h"><h3>Parámetros del costo</h3><span class="tag">tocá y recalcula</span></div>
       <div class="card-b"><div class="params-grid">
         ${field('bandejas.params.mpCristal',p.mpCristal,'MP rPET Cristal',{unit:'USD/kg',sub:'costo interno de planta'})}
         ${field('bandejas.params.mpNegro',p.mpNegro,'MP rPET Negro',{unit:'USD/kg'})}
@@ -1111,22 +1257,70 @@ function renderBandejas(){
         ${field('bandejas.params.salario',p.salario,'Salario operario',{unit:'ARS/h'})}
         ${field('bandejas.params.operarios',p.operarios,'Operarios',{unit:'pers'})}
         ${field('bandejas.params.cargas',(p.cargas*100),'Cargas sociales',{type:'pctnum',unit:'%'})}
-        ${field('bandejas.params.semVerde',(p.semVerde*100),'Umbral verde',{type:'pctnum',unit:'%'})}
-        ${field('bandejas.params.semAmarillo',(p.semAmarillo*100),'Umbral amarillo',{type:'pctnum',unit:'%'})}
-      </div></div>
+      </div></div></div>`;
+  } else {
+    const ensCods=S.bandejas.productos.filter(x=>x.linea==='Ensaladera').map(x=>x.cod);
+    const ensRows=[];
+    S.bandejas.ensaladeras.forEach((e,ei)=>{ ensCods.forEach(cod=>{
+      const val=e.p[cod]; if(val==null)return;
+      const precio=e.mon==='USD'?val:val/tc; const costo=bandejaCostByCod(cod);
+      ensRows.push({ei,cli:e.cli,mon:e.mon,cod,val,precio,costo,m:precio?(precio-costo)/precio:0}); }); });
+    const ensAvg=ensRows.reduce((a,r)=>a+r.m,0)/(ensRows.length||1);
+    const clamRows=Object.entries(S.bandejas.clamshells).map(([cod,val])=>{
+      const costo=bandejaCostByCod(cod); return {cod,val,costo,m:val?(val-costo)/val:0}; });
+    const clamAvg=clamRows.reduce((a,r)=>a+r.m,0)/(clamRows.length||1);
+    body=`
+    <div class="grid g4" style="margin-bottom:16px">
+      <div class="card stat accent"><div class="k">Margen ensaladeras</div><div class="v">${pct(ensAvg,1)}</div><div class="d">prom. sobre precio</div></div>
+      <div class="card stat"><div class="k">Margen clamshells</div><div class="v">${pct(clamAvg,1)}</div><div class="d">lista única blueberry</div></div>
+      <div class="card stat"><div class="k">Umbral verde</div><div class="v">${pct(p.semVerde,0)}</div><div class="d">amarillo ≥ ${pct(p.semAmarillo,0)}</div></div>
+      <div class="card stat"><div class="k">Cartera blueberry</div><div class="v">${S.bandejas.blueberry.length}</div><div class="d">clientes lista clamshell</div></div>
     </div>
-  </div>
 
-  <div class="card">
-    <div class="card-h"><h3>Cartera blueberry (lista clamshells)</h3><span class="tag">${S.bandejas.blueberry.length} clientes</span></div>
-    <div class="card-b" style="display:flex;flex-wrap:wrap;gap:7px">
-      ${S.bandejas.blueberry.map(b=>`<span class="chip">${b}</span>`).join('')}
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-h"><h3>Ensaladeras · precios por cliente</h3><span class="tag">USD/millar · Bandex en USD, resto ARS</span></div>
+      <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+        <th>Cliente</th><th>Producto</th><th>Moneda</th><th>Precio orig.</th><th>USD/millar</th><th>Costo</th><th>Margen USD</th><th>Margen%</th><th>Estado</th></tr></thead><tbody>
+        ${ensRows.map(r=>{ const s=semaforo(r.m,p.semVerde,p.semAmarillo);
+          return `<tr><td style="text-align:left">${r.cli}</td><td><span class="chip">${r.cod}</span></td>
+          <td><select class="tsel" data-path="bandejas.ensaladeras.${r.ei}.mon"><option ${r.mon==='USD'?'selected':''}>USD</option><option ${r.mon==='ARS'?'selected':''}>ARS</option></select></td>
+          <td>${nInp(`bandejas.ensaladeras.${r.ei}.p.${r.cod}`,r.val,{w:84})}</td>
+          <td class="num">${usd(r.precio,2)}</td><td class="num">${usd(r.costo,2)}</td>
+          <td class="num">${usd(r.precio-r.costo,2)}</td><td class="num"><b>${pct(r.m,1)}</b></td>
+          <td><span class="pill ${s}">${semLabel(s)}</span></td></tr>`;}).join('')}
+      </tbody></table></div></div></div>
+
+    <div class="grid g2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-h"><h3>Clamshells · lista única</h3><span class="tag">USD/millar</span></div>
+        <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Precio</th><th>Costo</th><th>Margen USD</th><th>Margen%</th><th>Estado</th></tr></thead><tbody>
+          ${clamRows.map(r=>{ const s=semaforo(r.m,p.semVerde,p.semAmarillo);
+            return `<tr><td><span class="chip teal">${r.cod}</span></td><td>${nInp(`bandejas.clamshells.${r.cod}`,r.val,{w:64})}</td>
+            <td class="num">${usd(r.costo,2)}</td><td class="num">${usd(r.val-r.costo,2)}</td><td class="num"><b>${pct(r.m,1)}</b></td>
+            <td><span class="pill ${s}">${semLabel(s)}</span></td></tr>`;}).join('')}
+        </tbody></table></div></div></div>
+      <div class="card">
+        <div class="card-h"><h3>Umbrales del semáforo</h3></div>
+        <div class="card-b"><div class="params-grid">
+          ${field('bandejas.params.semVerde',(p.semVerde*100),'Umbral verde',{type:'pctnum',unit:'%',sub:'margen saludable ≥'})}
+          ${field('bandejas.params.semAmarillo',(p.semAmarillo*100),'Umbral amarillo',{type:'pctnum',unit:'%',sub:'por debajo pasa a rojo'})}
+        </div></div></div>
     </div>
-  </div>`;
-  $('#bAdd').onclick=()=>{ S.bandejas.productos.push({cod:'NEW',linea:'Clamshell',mat:'Cristal',bruto:20,neto:16,vel:7000,otros:0.06}); commit(); renderBandejas(); };
+
+    <div class="card">
+      <div class="card-h"><h3>Cartera blueberry (lista clamshells)</h3><span class="tag">${S.bandejas.blueberry.length} clientes</span></div>
+      <div class="card-b" style="display:flex;flex-wrap:wrap;gap:7px">
+        ${S.bandejas.blueberry.map(b=>`<span class="chip">${b}</span>`).join('')}
+      </div></div>`;
+  }
+
+  $('#page-bandejas').innerHTML=head+body;
+  wireSub('bandejas',renderBandejas);
   $('#bExport').onclick=exportBandejas;
   $('#bSim').onclick=openBandejasSim;
-  $$('#page-bandejas [data-del-b]').forEach(b=>b.onclick=()=>{ S.bandejas.productos.splice(+b.dataset.delB,1); commit(); renderBandejas(); });
+  if($('#bAdd')) $('#bAdd').onclick=()=>{ S.bandejas.productos.push({cod:'NEW',linea:'Clamshell',mat:'Cristal',bruto:20,neto:16,vel:7000,otros:0.06}); commit(); renderBandejas(); };
+  $$('#page-bandejas [data-del-b]').forEach(b=>b.onclick=()=>{ S.bandejas.productos.splice(+b.dataset.delB,1); bExp.clear(); commit(); renderBandejas(); });
+  $$('#page-bandejas [data-exp]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.exp; bExp.has(i)?bExp.delete(i):bExp.add(i); renderBandejas(); });
 }
 
 /* ============================================================

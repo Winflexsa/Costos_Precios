@@ -1192,7 +1192,7 @@ function generatePetListPDF(id){
   const doc=new jsPDF({unit:'pt',format:'a4'});
   const W=doc.internal.pageSize.getWidth();
   // encabezado
-  doc.setFillColor(31,160,85); doc.rect(0,0,W,68,'F');
+  doc.setFillColor(40,168,92); doc.rect(0,0,W,68,'F');
   const logo=winflexLogoDataURL();
   if(logo){ try{ doc.addImage(logo,/jpe?g/.test(logo)?'JPEG':'PNG', 36,11,86,46); }catch(e){} }
   doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(15);
@@ -1207,7 +1207,7 @@ function generatePetListPDF(id){
   const head=isCur ? [['Cliente','Variante','Precio USD/kg','Precio ARS/kg','Costo USD/kg','M.Neto']]
                    : [['Cliente','Variante','Precio USD/kg','Precio ARS/kg']];
   doc.autoTable({ head, body, startY:84, theme:'grid', styles:{font:'helvetica',fontSize:9,cellPadding:4},
-    headStyles:{fillColor:[14,122,58],textColor:255}, alternateRowStyles:{fillColor:[244,251,246]},
+    headStyles:{fillColor:[31,160,85],textColor:255}, alternateRowStyles:{fillColor:[244,251,246]},
     columnStyles:{0:{halign:'left'},1:{halign:'left'}}, margin:{left:36,right:36} });
   doc.setFontSize(8); doc.setTextColor(120);
   doc.text('Winflex S.A. · Envases especiales · documento generado automáticamente', 36, doc.internal.pageSize.getHeight()-24);
@@ -1464,29 +1464,38 @@ function renderPE(){
   const c=calcPE(), p=S.pe.params, tc=TC();
   const insOpts=S.pe.insumos.map(i=>({v:i.cod,t:i.cod+' · '+i.desc}));
   const sumMix=S.pe.receta.reduce((a,r)=>a+r.p,0);
-  const parts=[
-    {label:'Materia prima (ajust. merma)',formula:`MP base ${usd(c.mpBase,3)} × factor merma ${c.factor.toFixed(3)}`,usd:c.mpAjust,color:'var(--amber)'},
-    {label:'Mano de obra',formula:`$${nf(p.valorHora)} × ${p.operarios} op × ${p.cargas} cargas ÷ ${p.prodHora} kg/h ÷ TC`,usd:c.MO,color:'var(--teal)'},
-    {label:'Energía',formula:`${p.motores} mot × ${p.consumoMotor} kW × $${p.usdkwh} ÷ ${p.prodHora} kg/h`,usd:c.energia,color:'var(--blue)'},
-    {label:'Otros varios',formula:'directo de parámetros',usd:c.otros,color:'var(--muted)'},
-    {label:'Otros indirectos',formula:'directo de parámetros',usd:c.indirectos,color:'#b8c0bc'}
-  ];
+  const comp=peComponents();
   $('#page-pe').innerHTML=`
-  <div class="section-head"><div><h2>Film PE</h2><div class="sub">Film de polietileno para laminado PET/PE · insumo interno (no se vende)</div></div>
+  <div class="section-head"><div><h2>Film PE</h2><div class="sub">Film de polietileno para laminado PET/PE · insumo interno (no se vende) · solo costos</div></div>
     <div class="sh-spacer"></div>
-    <button class="btn" id="peSim">📊 Simulador</button>
+    <button class="btn" id="peCalc">🧮 Calculadora</button>
+    <button class="btn" id="peSave">💾 Guardar costo</button>
+    <button class="btn" id="peHist">🕘 Historial</button>
     <button class="btn" id="peExport">⬇ Excel</button>
   </div>
   <div class="banner info">ℹ️ Este film es un insumo de la laminadora; no tiene lista de precios. Su costo total entra como precio del PE en el módulo Laminado PET/PE.</div>
 
   <div class="grid g4" style="margin-bottom:16px">
-    <div class="card stat accent"><div class="k">Costo total</div><div class="v">${usd(c.total,2)}<small>/kg</small></div><div class="d">${ars(c.totalARS)}/kg</div></div>
-    <div class="card stat"><div class="k">MP ajustada</div><div class="v">${usd(c.mpAjust,2)}<small>/kg</small></div><div class="d">base ${usd(c.mpBase,2)} × ${c.factor.toFixed(3)}</div></div>
+    <div class="card stat accent"><div class="k">Costo total</div><div class="v">${usd(c.total,3)}<small>/kg</small></div><div class="d">${ars(c.totalARS)}/kg</div></div>
+    <div class="card stat"><div class="k">MP ajustada</div><div class="v">${usd(c.mpAjust,3)}<small>/kg</small></div><div class="d">base ${usd(c.mpBase,3)} × ${c.factor.toFixed(3)}</div></div>
     <div class="card stat"><div class="k">Procesamiento</div><div class="v">${usd(c.proc,3)}<small>/kg</small></div><div class="d">MO + energía + otros</div></div>
     <div class="card stat"><div class="k">Capacidad línea</div><div class="v">${p.prodHora}<small> kg/h</small></div><div class="d">${p.operarios} operarios/turno</div></div>
   </div>
 
-  <div style="margin-bottom:16px">${anatomyCard('Anatomía del costo',parts,'Costo total por kg',{tag:`merma ${pct(p.merma,0)} · TC ${ars(tc)}`,dec:4})}</div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><h3>Anatomía del costo</h3><span class="tag">tocá cada componente · merma ${pct(p.merma,0)} · TC ${ars(tc)}</span></div>
+    <div class="card-b">
+      ${breakdownBar(comp.parts.map(x=>({label:x.label,val:x.usd,color:x.color})))}
+      <div class="note" style="margin:10px 0 4px">Tocá cada componente para ver cómo se calcula.</div>
+      <div class="tbl-wrap"><table><thead><tr><th>Componente</th><th>USD/kg</th><th>ARS/kg</th><th>% costo</th><th></th></tr></thead><tbody>
+        ${comp.parts.map((x,i)=>{ const open=peAnatExp.has(i);
+          return `<tr class="clickrow" data-pean="${i}" style="cursor:pointer"><td style="text-align:left"><b>${x.label}</b></td>
+            <td class="num">${usd(x.usd,4)}</td><td class="num">${ars(x.usd*tc)}</td><td class="num">${pct(x.usd/(c.total||1),1)}</td>
+            <td class="num"><span class="lnk">${open?'▲':'▼'}</span></td></tr>
+          ${open?`<tr class="exp-row"><td colspan="5"><div style="padding:6px 2px">${peCompDetail(x.key,c,p,tc)}</div></td></tr>`:''}`;}).join('')}
+        <tr class="total"><td style="text-align:left">Costo total por kg</td><td class="num">${usd(c.total,4)}</td><td class="num">${ars(c.totalARS)}</td><td class="num">100%</td><td></td></tr>
+      </tbody></table></div>
+    </div></div>
 
   <div class="grid g2" style="margin-bottom:16px">
     <div class="card">
@@ -1520,8 +1529,11 @@ function renderPE(){
         <td>${nInp(`pe.insumos.${i}.usd`,m.usd,{w:70})}</td><td class="num">${ars(m.usd*tc)}</td>
         <td><input class="tinp" style="max-width:96px;text-align:left;font-family:'IBM Plex Sans'" data-path="pe.insumos.${i}.upd" value="${m.upd}"></td></tr>`).join('')}
     </tbody></table></div></div></div>`;
-  $('#peExport').onclick=exportPE;
-  $('#peSim').onclick=openPeSim;
+  $('#peExport').onclick=exportPeCompleto;
+  $('#peCalc').onclick=openPeCalc;
+  $('#peSave').onclick=peSaveCost;
+  $('#peHist').onclick=openPeCostHistory;
+  $$('#page-pe [data-pean]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.pean; peAnatExp.has(i)?peAnatExp.delete(i):peAnatExp.add(i); renderPE(); });
 }
 
 /* ============================================================
@@ -2141,6 +2153,272 @@ async function exportPE(){
   dataRows(wi,5,HI,S.pe.insumos.map(m=>({...m,arsv:m.usd*TC()})));
   await download(wb,'Winflex_FilmPE_costo.xlsx');
 }
+
+/* ============================================================
+   FILM PE · anatomía clickeable + calculadora + historial + Excel
+   ============================================================ */
+let peAnatExp=new Set(), peCalc=null;
+
+function peComponents(){
+  const c=calcPE();
+  return { c, parts:[
+    {key:'mp', label:'Materia prima (MP ajustada)', usd:c.mpAjust, color:'var(--amber)'},
+    {key:'mo', label:'Mano de obra', usd:c.MO, color:'var(--teal)'},
+    {key:'en', label:'Energía', usd:c.energia, color:'var(--blue)'},
+    {key:'ov', label:'Otros varios', usd:c.otros, color:'var(--muted)'},
+    {key:'oi', label:'Otros indirectos', usd:c.indirectos, color:'#b8c0bc'}
+  ]};
+}
+function peCompDetail(key,c,p,tc){
+  if(key==='mp'){
+    const rows=S.pe.receta.filter(r=>r.p>0).map(r=>{ const ins=S.pe.insumos.find(x=>x.cod===r.cod)||{};
+      return `<tr><td style="text-align:left"><span class="chip">${ins.cod||r.cod}</span> ${ins.desc||''}</td><td class="num">${pct(r.p,0)}</td><td class="num">${usd(ins.usd||0,2)}</td><td class="num">${usd(r.p*(ins.usd||0),3)}</td></tr>`;}).join('');
+    return `<div class="params-sub" style="margin-bottom:6px">Composición de la materia prima → ajuste por merma</div>
+      <div class="tbl-wrap"><table><thead><tr><th>Insumo</th><th>%</th><th>USD/kg</th><th>Aporte</th></tr></thead><tbody>${rows}
+        <tr class="total"><td style="text-align:left">MP base</td><td></td><td></td><td class="num">${usd(c.mpBase,3)}</td></tr>
+        <tr><td style="text-align:left">× factor merma (1 ÷ (1 − ${pct(p.merma,0)}))</td><td></td><td></td><td class="num">× ${c.factor.toFixed(3)}</td></tr>
+        <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= MP ajustada</td><td></td><td></td><td class="num"><b>${usd(c.mpAjust,3)}</b></td></tr>
+      </tbody></table></div>`;
+  }
+  if(key==='mo') return `<div class="formula">Mano de obra = (valor hora × operarios × cargas) ÷ producción ÷ TC<br>
+    = ($${nf(p.valorHora)} × ${p.operarios} × ${p.cargas}) ÷ ${p.prodHora} kg/h ÷ ${ars(tc)} = <b>${usd(c.MO,4)}/kg</b> (${ars(c.MO*tc)}/kg)</div>`;
+  if(key==='en') return `<div class="formula">Energía = (motores × consumo × costo kWh) ÷ producción<br>
+    = (${p.motores} × ${p.consumoMotor} kW × US$${p.usdkwh}/kWh) ÷ ${p.prodHora} kg/h = <b>${usd(c.energia,4)}/kg</b> (${ars(c.energia*tc)}/kg)</div>`;
+  if(key==='ov') return `<div class="formula">Otros varios — valor directo de parámetros: <b>${usd(c.otros,4)}/kg</b> (${ars(c.otros*tc)}/kg)</div>`;
+  if(key==='oi') return `<div class="formula">Otros indirectos — valor directo de parámetros: <b>${usd(c.indirectos,4)}/kg</b> (${ars(c.indirectos*tc)}/kg)</div>`;
+  return '';
+}
+
+/* ---------------- Calculadora de costos PE ---------------- */
+function peCalcDefaults(){
+  const c=calcPE(), p=S.pe.params;
+  const pct=S.pe.insumos.map(ins=>{ const r=S.pe.receta.find(x=>x.cod===ins.cod); return r?r.p:0; });
+  peCalc={ ins:S.pe.insumos.map(i=>({cod:i.cod,desc:i.desc,usd:i.usd})), pct,
+    tc:Math.round(TC()), merma:p.merma, proc:c.proc, qty:1000 };
+}
+function peCalcCompute(){
+  const c=peCalc; let mpBase=0; c.ins.forEach((m,i)=>mpBase+=(c.pct[i]||0)*(m.usd||0));
+  const factor=1/(1-c.merma); const mpAjust=mpBase*factor;
+  const total=mpAjust+c.proc; const sum=c.pct.reduce((a,x)=>a+x,0);
+  return {mpBase,factor,mpAjust,proc:c.proc,total,arsU:total*c.tc,sum,totalUSD:total*c.qty,totalARS:total*c.tc*c.qty};
+}
+function peCalcResultHTML(){
+  const c=peCalc, r=peCalcCompute(); const ok=Math.abs(r.sum-1)<0.001;
+  const bar=breakdownBar([{label:'MP ajustada',val:r.mpAjust,color:'var(--amber)'},{label:'Procesamiento',val:r.proc,color:'var(--teal)'}]);
+  return `
+  <div class="gauto" style="margin-bottom:14px">
+    <div class="card stat accent"><div class="card-b stat"><div class="k">Costo unitario</div><div class="v">${usd(r.total,3)}<small>/kg</small></div><div class="d">${ars(r.arsU)}/kg</div></div></div>
+    <div class="card stat"><div class="card-b stat"><div class="k">Total ${nf(c.qty)} kg</div><div class="v">${usd(r.totalUSD,2)}</div><div class="d">${ars(r.totalARS)}</div></div></div>
+  </div>
+  ${!ok?`<div class="banner warn" style="margin-bottom:12px">⚠ La receta suma ${pct(r.sum,0)} (debería ser 100%).</div>`:''}
+  <div class="card"><div class="card-b">${bar}
+    <div class="tbl-wrap" style="margin-top:12px"><table><tbody>
+      ${c.ins.map((m,i)=>(c.pct[i]>0)?`<tr><td style="text-align:left"><span class="chip">${m.cod}</span> <span class="note">${m.desc}</span></td><td class="num">${pct(c.pct[i],0)}</td><td class="num">${usd(m.usd,2)}</td><td class="num">${usd(c.pct[i]*(m.usd||0),3)}</td></tr>`:'').join('')}
+      <tr class="total"><td style="text-align:left">MP base</td><td></td><td></td><td class="num">${usd(r.mpBase,3)}</td></tr>
+      <tr><td style="text-align:left">× factor merma (1 ÷ (1 − ${pct(c.merma,0)}))</td><td></td><td></td><td class="num">× ${r.factor.toFixed(3)}</td></tr>
+      <tr class="total"><td style="text-align:left">MP ajustada</td><td></td><td></td><td class="num">${usd(r.mpAjust,3)}</td></tr>
+      <tr><td style="text-align:left">+ Procesamiento</td><td></td><td></td><td class="num">${usd(r.proc,3)}</td></tr>
+      <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= Costo unitario</td><td></td><td></td><td class="num"><b>${usd(r.total,3)}</b></td></tr>
+    </tbody></table></div></div></div>`;
+}
+function openPeCalc(){
+  peCalcDefaults();
+  openModal(`<div class="modal-h"><h3>🧮 Calculadora de costos — Film PE</h3><button class="x" onclick="closeModal()">✕</button></div>
+   <div class="modal-b">
+     <div class="note" style="margin-bottom:12px">Armá una receta y un escenario y mirá el costo al instante. No toca tus datos; podés exportar el cálculo a Excel.</div>
+     <div class="gauto">
+       <div class="card"><div class="card-h"><h3>Receta</h3></div>
+         <div class="card-b">
+           <div style="display:flex;gap:8px;color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;padding:0 2px 6px">
+             <span style="flex:1">Insumo</span><span style="width:66px;text-align:center">USD/kg</span><span style="width:48px;text-align:center">%</span></div>
+           ${peCalc.ins.map((m,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid var(--line2)">
+             <span class="chip">${m.cod}</span>
+             <span class="note" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.desc}</span>
+             <input id="pec_mp_${i}" class="tinp" type="number" step="any" value="${m.usd}" style="width:66px;flex:none;text-align:right">
+             <input id="pec_pct_${i}" class="tinp" type="number" step="any" value="${+(peCalc.pct[i]*100).toFixed(2)}" style="width:48px;flex:none;text-align:right">
+           </div>`).join('')}
+         </div></div>
+       <div class="card"><div class="card-h"><h3>Escenario</h3></div>
+         <div class="card-b"><div style="display:grid;gap:10px">
+           <div class="field"><label>Tipo de cambio<small>ARS/USD</small></label><div class="iw"><input type="number" id="pec_tc" value="${peCalc.tc}"></div></div>
+           <div class="field"><label>Merma proceso<small>%</small></label><div class="iw"><input type="number" id="pec_merma" value="${(peCalc.merma*100).toFixed(1)}"></div></div>
+           <div class="field"><label>Procesamiento<small>USD/kg</small></label><div class="iw"><input type="number" step="any" id="pec_proc" value="${peCalc.proc.toFixed(4)}"></div></div>
+           <div class="field"><label>Cantidad<small>kg</small></label><div class="iw"><input type="number" id="pec_qty" value="${peCalc.qty}"></div></div>
+           <div class="note">Procesamiento = mano de obra + energía + otros + indirectos. Editalo para simular otro escenario.</div>
+         </div></div></div>
+     </div>
+     <div id="peCalcResult" style="margin-top:14px">${peCalcResultHTML()}</div>
+   </div>
+   <div class="modal-foot"><button class="btn" id="peCalcExport">⬇ Exportar cálculo (Excel)</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`,true);
+  function readAndRender(){
+    for(let i=0;i<peCalc.ins.length;i++){ peCalc.ins[i].usd=num($('#pec_mp_'+i).value); peCalc.pct[i]=num($('#pec_pct_'+i).value)/100; }
+    peCalc.tc=num($('#pec_tc').value)||TC(); peCalc.merma=num($('#pec_merma').value)/100;
+    peCalc.proc=num($('#pec_proc').value); peCalc.qty=num($('#pec_qty').value);
+    $('#peCalcResult').innerHTML=peCalcResultHTML();
+  }
+  ['pec_tc','pec_merma','pec_proc','pec_qty'].forEach(id=>$('#'+id).oninput=readAndRender);
+  for(let i=0;i<peCalc.ins.length;i++){ $('#pec_mp_'+i).oninput=readAndRender; $('#pec_pct_'+i).oninput=readAndRender; }
+  $('#peCalcExport').onclick=exportPeCalc;
+}
+async function exportPeCalc(){
+  const c=peCalc, r=peCalcCompute(), wb=new ExcelJS.Workbook(), ws=wb.addWorksheet('Cálculo');
+  const H=[{t:'Concepto',k:'k',w:34},{t:'Valor',k:'v',w:16},{t:'Detalle',k:'d',w:30}];
+  petTitle(wb,ws,'Film PE · Cálculo de costo',H.length); setCols(ws,H); headerRow(ws,4,H);
+  const rows=[];
+  c.ins.forEach((m,i)=>{ if(c.pct[i]>0) rows.push({k:m.cod+' · '+m.desc, v:m.usd, d:pct(c.pct[i],0)+' · aporte '+usd(c.pct[i]*m.usd,3)}); });
+  rows.push({k:'MP base',v:r.mpBase,d:'USD/kg'});
+  rows.push({k:'Factor merma',v:r.factor,d:'1 ÷ (1 − '+pct(c.merma,0)+')'});
+  rows.push({k:'MP ajustada',v:r.mpAjust,d:'USD/kg'});
+  rows.push({k:'Procesamiento',v:r.proc,d:'USD/kg'});
+  rows.push({k:'COSTO UNITARIO',v:r.total,d:'USD/kg · '+ars(r.arsU)+'/kg'});
+  rows.push({k:'Tipo de cambio',v:c.tc,d:'ARS/USD'});
+  rows.push({k:'Cantidad',v:c.qty,d:'kg'});
+  rows.push({k:'TOTAL',v:r.totalUSD,d:'USD · '+ars(r.totalARS)});
+  dataRows(ws,5,H,rows);
+  await download(wb,'Winflex_FilmPE_calculo.xlsx');
+}
+
+/* ---------------- Historial de costos PE ---------------- */
+function peSaveCost(){
+  openModal(`<div class="modal-h"><h3>💾 Guardar costo Film PE</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b"><div class="note" style="margin-bottom:12px">Guarda una foto del costo actual del Film PE (componentes, receta, parámetros y TC). Queda en el historial para consultar, imprimir o reactivar.</div>
+      <div class="field"><label>Etiqueta de la versión</label><div class="iw"><input id="peSnapLabel" type="text" placeholder="Ej: Costo junio 2026" style="font-family:'IBM Plex Sans'"></div></div></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button><button class="btn primary" id="peSnapSave">Guardar versión</button></div>`);
+  $('#peSnapLabel').focus();
+  $('#peSnapSave').onclick=()=>{
+    const c=calcPE(); S.pe.costHistory=S.pe.costHistory||[];
+    S.pe.costHistory.unshift({ id:Date.now(), date:nowISO(),
+      label:$('#peSnapLabel').value.trim()||('Costo '+new Date().toLocaleDateString('es-AR')),
+      tc:TC(), total:c.total, mpBase:c.mpBase, factor:c.factor, mpAjust:c.mpAjust, proc:c.proc,
+      MO:c.MO, energia:c.energia, otros:c.otros, indirectos:c.indirectos,
+      receta:clone(S.pe.receta), insumos:clone(S.pe.insumos), params:clone(S.pe.params) });
+    if(S.pe.costHistory.length>50) S.pe.costHistory.length=50;
+    commit(); closeModal(); toast('Costo guardado','ok');
+  };
+}
+function openPeCostHistory(){
+  S.pe.costHistory=S.pe.costHistory||[];
+  const cur=calcPE();
+  const card=(active,id,title,sub,tc,total,proc)=>`
+    <div style="border:1px solid ${active?'var(--teal)':'var(--line)'};background:${active?'var(--teal-l)':'var(--card)'};border-radius:12px;padding:12px 14px;margin-bottom:10px;cursor:pointer" data-pehpdf="${active?'__cur__':id}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div style="text-align:left"><div style="font-weight:700;font-size:14px">${active?'<span style="color:var(--teal)">● ACTIVO</span> — ':''}${title}</div>
+          <div class="note" style="margin-top:2px">${sub}</div></div>
+        <div style="text-align:right;white-space:nowrap"><div class="mono" style="font-size:13px"><b>${usd(total,3)}</b>/kg</div>
+          <div class="note">proc ${usd(proc,3)} · TC ${ars(tc)}</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px" data-noclick>
+        <button class="btn sm" data-pepdf="${active?'__cur__':id}">📄 PDF</button>
+        ${active?'<span class="note" style="align-self:center">Costo en uso</span>'
+          :`<button class="btn sm primary" data-peact="${id}">Activar</button><button class="btn sm" data-pedel="${id}" style="color:var(--red)">Eliminar</button>`}
+      </div>
+    </div>`;
+  openModal(`<div class="modal-h"><h3>🕘 Historial de costos — Film PE</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b">
+      <div class="note" style="margin-bottom:12px">La tarjeta resaltada es el costo <b>activo</b>. Tocá cualquier tarjeta para abrir su PDF. Usá <b>Activar</b> para volver a ese escenario (receta + parámetros).</div>
+      ${card(true,'__cur__','Costo actual','Se actualiza con la receta y parámetros vigentes',TC(),cur.total,cur.proc)}
+      ${S.pe.costHistory.length?S.pe.costHistory.map(h=>card(false,h.id,h.label,new Date(h.date).toLocaleString('es-AR'),h.tc,h.total,h.proc)).join('')
+        :'<div class="empty" style="padding:14px">Todavía no guardaste ningún costo. Usá “💾 Guardar costo”.</div>'}
+    </div>
+    <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
+  $$('#modal [data-pehpdf]').forEach(c=>c.onclick=e=>{ if(e.target.closest('[data-noclick]'))return; generatePeCostPDF(c.dataset.pehpdf); });
+  $$('#modal [data-pepdf]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); generatePeCostPDF(b.dataset.pepdf); });
+  $$('#modal [data-peact]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); const h=S.pe.costHistory.find(x=>x.id==b.dataset.peact); if(!h)return;
+    if(!confirm(`¿Activar “${h.label}”? Se sobrescriben receta y parámetros actuales del Film PE.`)) return;
+    S.pe.receta=clone(h.receta); S.pe.insumos=clone(h.insumos); S.pe.params=clone(h.params);
+    commit(); closeModal(); renderPE(); toast('Costo activado','ok'); });
+  $$('#modal [data-pedel]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); S.pe.costHistory=S.pe.costHistory.filter(x=>x.id!=b.dataset.pedel); commit(); openPeCostHistory(); });
+}
+function generatePeCostPDF(id){
+  if(!window.jspdf||!window.jspdf.jsPDF){ toast('Generador de PDF no disponible','err'); return; }
+  let label,tc,comp,receta,insumos;
+  if(id==='__cur__'){ const c=calcPE(); label='Costo actual'; tc=TC();
+    comp={total:c.total,mpAjust:c.mpAjust,mpBase:c.mpBase,factor:c.factor,proc:c.proc,MO:c.MO,energia:c.energia,otros:c.otros,indirectos:c.indirectos};
+    receta=S.pe.receta; insumos=S.pe.insumos; }
+  else { const h=(S.pe.costHistory||[]).find(x=>x.id==id); if(!h){toast('Versión no encontrada','err');return;}
+    label=h.label; tc=h.tc; comp=h; receta=h.receta; insumos=h.insumos; }
+  const { jsPDF }=window.jspdf; const doc=new jsPDF({unit:'pt',format:'a4'}); const W=doc.internal.pageSize.getWidth();
+  doc.setFillColor(40,168,92); doc.rect(0,0,W,68,'F');
+  const logo=winflexLogoDataURL(); if(logo){ try{ doc.addImage(logo,/jpe?g/.test(logo)?'JPEG':'PNG',36,11,86,46); }catch(e){} }
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(15);
+  doc.text('WINFLEX S.A. — Costo Film PE', W-36, 30, {align:'right'});
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  doc.text(`${label} · TC ${ars(tc)} · ${new Date().toLocaleDateString('es-AR')}`, W-36, 48, {align:'right'});
+  doc.autoTable({ startY:84, theme:'grid', styles:{font:'helvetica',fontSize:9,cellPadding:4},
+    headStyles:{fillColor:[31,160,85],textColor:255}, columnStyles:{0:{halign:'left'}}, margin:{left:36,right:36},
+    head:[['Componente','USD/kg','ARS/kg','% costo']],
+    body:[['Materia prima (MP ajustada)',usd(comp.mpAjust,4),ars(comp.mpAjust*tc),pct(comp.mpAjust/(comp.total||1),1)],
+      ['Mano de obra',usd(comp.MO,4),ars(comp.MO*tc),pct(comp.MO/(comp.total||1),1)],
+      ['Energía',usd(comp.energia,4),ars(comp.energia*tc),pct(comp.energia/(comp.total||1),1)],
+      ['Otros varios',usd(comp.otros,4),ars(comp.otros*tc),pct(comp.otros/(comp.total||1),1)],
+      ['Otros indirectos',usd(comp.indirectos,4),ars(comp.indirectos*tc),pct(comp.indirectos/(comp.total||1),1)]],
+    foot:[['COSTO TOTAL',usd(comp.total,4),ars(comp.total*tc),'100%']],
+    footStyles:{fillColor:[234,246,239],textColor:[14,122,58],fontStyle:'bold'} });
+  const recBody=receta.filter(r=>r.p>0).map(r=>{ const ins=insumos.find(x=>x.cod===r.cod)||{};
+    return [ (ins.cod||r.cod)+' · '+(ins.desc||''), pct(r.p,0), usd(ins.usd||0,2), usd(r.p*(ins.usd||0),3) ]; });
+  doc.autoTable({ startY:doc.lastAutoTable.finalY+18, theme:'grid', styles:{font:'helvetica',fontSize:9,cellPadding:4},
+    headStyles:{fillColor:[31,160,85],textColor:255}, columnStyles:{0:{halign:'left'}}, margin:{left:36,right:36},
+    head:[['Receta de mezcla','%','USD/kg','Aporte']], body:recBody,
+    foot:[['MP base → × '+comp.factor.toFixed(3)+' → MP ajustada','', usd(comp.mpBase,3), usd(comp.mpAjust,3)]],
+    footStyles:{fillColor:[244,251,246],textColor:[21,32,31]} });
+  doc.setFontSize(8); doc.setTextColor(120);
+  doc.text('Winflex S.A. · Envases especiales · Film PE es insumo interno (no se vende)', 36, doc.internal.pageSize.getHeight()-24);
+  doc.output('dataurlnewwindow');
+}
+
+/* ---------------- Excel completo PE ---------------- */
+async function peSheetParametros(wb){
+  const p=S.pe.params, ws=wb.addWorksheet('Parámetros');
+  const H=[{t:'Parámetro',k:'par',w:30},{t:'Valor',k:'val',w:16},{t:'Unidad',k:'uni',w:16}];
+  const rows=[{par:'Tipo de cambio',val:TC(),uni:'ARS/USD'},{par:'Valor hora MO',val:p.valorHora,uni:'ARS/h'},
+    {par:'Cargas sociales',val:p.cargas,uni:'×'},{par:'Operarios por turno',val:p.operarios,uni:'pers'},
+    {par:'Producción',val:p.prodHora,uni:'kg/h'},{par:'Motores',val:p.motores,uni:'u'},
+    {par:'Consumo por motor',val:p.consumoMotor,uni:'kW/h'},{par:'Costo energía',val:p.usdkwh,uni:'USD/kWh'},
+    {par:'Merma de proceso',val:p.merma,uni:'fracción'},{par:'Otros varios',val:p.otrosVarios,uni:'USD/kg'},
+    {par:'Otros indirectos',val:p.otrosIndirectos,uni:'USD/kg'}];
+  petTitle(wb,ws,'Film PE · Parámetros',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+}
+async function peSheetInsumos(wb){
+  const tc=TC(), ws=wb.addWorksheet('Insumos');
+  const H=[{t:'Cód',k:'cod',w:9},{t:'Descripción',k:'desc',w:30},{t:'Proveedor',k:'prov',w:18},{t:'USD/kg',k:'usd',w:12,fmt:XF.usd2},{t:'ARS/kg',k:'ars',w:13,fmt:XF.ars},{t:'Actualizado',k:'upd',w:13}];
+  petTitle(wb,ws,'Film PE · Insumos',H.length); setCols(ws,H); headerRow(ws,4,H);
+  dataRows(ws,5,H,S.pe.insumos.map(m=>({...m,ars:m.usd*tc})));
+}
+async function peSheetCostos(wb){
+  const c=calcPE(), tc=TC(), ws=wb.addWorksheet('Costos por kg');
+  const H=[{t:'Componente',k:'comp',w:28},{t:'USD/kg',k:'usd',w:13,fmt:XF.usd4},{t:'ARS/kg',k:'ars',w:13,fmt:XF.ars},{t:'% del costo',k:'pc',w:12,fmt:XF.pct}];
+  const comps=[['Materia prima (MP ajustada)',c.mpAjust],['Mano de obra',c.MO],['Energía',c.energia],['Otros varios',c.otros],['Otros indirectos',c.indirectos]];
+  const rows=comps.map(([comp,u])=>({comp,usd:u,ars:u*tc,pc:u/(c.total||1)}));
+  petTitle(wb,ws,'Film PE · Costos por kg',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  totalRow(ws,5+rows.length,H,{comp:'COSTO TOTAL',usd:c.total,ars:c.totalARS,pc:1});
+}
+async function peSheetReceta(wb){
+  const c=calcPE(), ws=wb.addWorksheet('Receta');
+  const H=[{t:'Insumo',k:'ins',w:34},{t:'% mezcla',k:'p',w:11,fmt:XF.pct},{t:'USD/kg',k:'usd',w:12,fmt:XF.usd2},{t:'Aporte',k:'ap',w:12,fmt:XF.usd3}];
+  const rows=S.pe.receta.map(r=>{ const ins=S.pe.insumos.find(x=>x.cod===r.cod)||{}; return {ins:(ins.cod||r.cod)+' · '+(ins.desc||''),p:r.p,usd:ins.usd||0,ap:r.p*(ins.usd||0)}; });
+  petTitle(wb,ws,'Film PE · Receta de mezcla',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  totalRow(ws,5+rows.length,H,{ins:'MP base → × '+c.factor.toFixed(3)+' → MP ajustada '+usd(c.mpAjust,3),ap:c.mpBase});
+}
+async function peSheetNotas(wb){
+  const p=S.pe.params, ws=wb.addWorksheet('Notas');
+  const H=[{t:'Notas y supuestos',k:'n',w:90}];
+  const rows=[
+    {n:'Film PE es un insumo interno para la laminadora PET/PE; no tiene lista de precios.'},
+    {n:'MP ajustada = MP base ÷ (1 − merma). MP base = Σ (% mezcla × USD/kg del insumo).'},
+    {n:'Mano de obra = (valor hora × operarios × cargas) ÷ producción ÷ TC.'},
+    {n:'Energía = (motores × consumo × costo kWh) ÷ producción.'},
+    {n:`Costo total = MP ajustada + mano de obra + energía + otros varios + otros indirectos. Merma actual ${pct(p.merma,0)}.`},
+    {n:'El costo total del Film PE entra como precio del PE en el módulo Laminado PET/PE.'},
+    {n:'Generado automáticamente desde la app de Costos & Precios de Winflex.'}
+  ];
+  petTitle(wb,ws,'Film PE · Notas',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+}
+async function exportPeCompleto(){
+  const wb=new ExcelJS.Workbook();
+  await peSheetParametros(wb); await peSheetInsumos(wb); await peSheetCostos(wb); await peSheetReceta(wb); await peSheetNotas(wb);
+  await download(wb,'Winflex_FilmPE_Completo.xlsx');
+}
+
 async function exportPETPE(){
   const rows=S.petpe.productos.map(petpeRow); const wb=new ExcelJS.Workbook(); const ws=wb.addWorksheet('Productos');
   const H=[{t:'Cliente',k:'cli',w:20},{t:'Medida',k:'med',w:12},{t:'Esp.PET',k:'ePET',w:9,fmt:XF.int},{t:'Esp.PE',k:'ePE',w:9,fmt:XF.int},

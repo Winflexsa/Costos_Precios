@@ -488,7 +488,8 @@ const SEED = {
       "Blueberries","Bulca","Cantallops Diego","Coop. Agrícola","Early Crop","Frutas Argentinas",
       "Guerrero Fénix","La Esperanza","La Pampa","Los Pinos","NorBerries","NQN Berries","Pampa Berries",
       "Patagonia Berries","Refsa","Río Negro Berries","San Pedro Frut","SudBerries","Traful Cupal",
-      "Trapiche Berries","Tres Pinos","Valle Andino","Vista Alegre","ZBlueberries"]
+      "Trapiche Berries","Tres Pinos","Valle Andino","Vista Alegre","ZBlueberries"],
+    listHistory:[]
   },
 
   history:[]   // snapshots manuales de listas de precios
@@ -1721,8 +1722,10 @@ function renderBandejas(){
 
   const head=`<div class="section-head"><div><h2>Bandejas</h2><div class="sub">Termoformado: ${prods.length} productos · ensaladeras + clamshells</div></div>
     <div class="sh-spacer"></div>
-    <button class="btn" id="bSim">📊 Simulador</button>
-    <button class="btn" id="bExport">⬇ Excel</button>
+    <button class="btn" id="bCalc">🧮 Calculadora</button>
+    ${sub==='precios'?`<button class="btn" id="bSave">💾 Guardar lista</button>
+    <button class="btn" id="bHist">🕘 Historial</button>`:''}
+    <button class="btn" id="bExport">⬇ Excel ▾</button>
   </div>
   ${subnav('bandejas',[{id:'costos',label:'🧮 Costos'},{id:'precios',label:'🏷️ Precios'}])}`;
 
@@ -1752,16 +1755,7 @@ function renderBandejas(){
           <td class="num"><b>${usd(r.usdMillar,2)}</b></td>
           <td><span class="lnk" data-exp="${r.i}">${open?'ocultar ▲':'desglose ▼'}</span></td>
           <td class="row-actions"><button class="mini-x" data-del-b="${r.i}">✕</button></td></tr>
-          ${open?`<tr class="exp-row"><td colspan="10"><div class="exp-grid">
-            <div class="ei">Desperdicio<b>${r.desp.toFixed(2)} g</b><span class="ef">bruto − neto</span></div>
-            <div class="ei">MP utilizada<b>${(r.mpUtil*1000).toFixed(2)} g/u</b><span class="ef">(neto + desp×(1−recup)) ÷ 1000</span></div>
-            <div class="ei">Costo MP / u<b>${usd(r.cMP,5)}</b><span class="ef">${r.mpUtil.toFixed(5)} kg × ${usd(precioMP,2)}</span></div>
-            <div class="ei">Costo MO / u<b>${usd(r.cMO,5)}</b><span class="ef">$${nf(p.salario*p.operarios*(1+p.cargas))}/h ÷ ${r.vel} u/h ÷ TC</span></div>
-            <div class="ei">Energía / u<b>${usd(r.cEner,5)}</b><span class="ef">MP util × $${p.energia}</span></div>
-            <div class="ei">Otros / u<b>${usd(r.cOtros,5)}</b><span class="ef">MP util × $${r.otros}</span></div>
-            <div class="ei">Costo total / u<b>${usd(r.totalU,5)}</b></div>
-            <div class="ei">Costo / millar<b style="color:var(--teal)">${usd(r.usdMillar,2)}</b><span class="ef">total/u × 1000</span></div>
-          </div></td></tr>`:''}`;}).join('')}
+          ${open?`<tr class="exp-row"><td colspan="10"><div style="padding:4px 2px">${baProductDetail(r,p,tc)}</div></td></tr>`:''}`;}).join('')}
       </tbody></table></div>
       <div class="note" style="margin-top:8px">Energía y Otros se aplican sobre la MP utilizada (no sobre el peso bruto). Tocá “desglose” para ver el cálculo unidad por unidad. No incluye empaque ni flete (gasto comercial separado).</div></div></div>
 
@@ -1834,8 +1828,10 @@ function renderBandejas(){
 
   $('#page-bandejas').innerHTML=head+body;
   wireSub('bandejas',renderBandejas);
-  $('#bExport').onclick=exportBandejas;
-  $('#bSim').onclick=openBandejasSim;
+  $('#bExport').onclick=openBaExportMenu;
+  $('#bCalc').onclick=openBaCalc;
+  if($('#bSave')) $('#bSave').onclick=baListSave;
+  if($('#bHist')) $('#bHist').onclick=openBaListHistory;
   if($('#bAdd')) $('#bAdd').onclick=()=>{ S.bandejas.productos.push({cod:'NEW',linea:'Clamshell',mat:'Cristal',bruto:20,neto:16,vel:7000,otros:0.06}); commit(); renderBandejas(); };
   $$('#page-bandejas [data-del-b]').forEach(b=>b.onclick=()=>{ S.bandejas.productos.splice(+b.dataset.delB,1); bExp.clear(); commit(); renderBandejas(); });
   $$('#page-bandejas [data-exp]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.exp; bExp.has(i)?bExp.delete(i):bExp.add(i); renderBandejas(); });
@@ -2887,6 +2883,282 @@ async function exportBandejas(){
     return {cod,val,costo,m:val?(val-costo)/val:0,__sg:p.semVerde,__sa:p.semAmarillo}; });
   addTitle(wcl,'Bandejas · Clamshells (lista única)',stamp(),HL.length); setCols(wcl,HL); headerRow(wcl,4,HL); dataRows(wcl,5,HL,lrows);
   await download(wb,'Winflex_Bandejas.xlsx');
+}
+
+/* ====================== BANDEJAS · detalle / calc / excel / historial ====================== */
+let baCalc=null;
+
+/* desglose de costo por producto (dos sub-tablas, estilo PET/PE) */
+function baProductDetail(r,p,tc){
+  const precioMP=r.mat==='Negro'?p.mpNegro:p.mpCristal, MOh=p.salario*p.operarios*(1+p.cargas);
+  const geo=`<div class="tbl-wrap"><table><thead><tr><th>Geometría y material</th><th>Cálculo</th><th>Valor</th></tr></thead><tbody>
+    <tr><td style="text-align:left">Peso bruto</td><td class="formula" style="text-align:left">gramaje de lámina</td><td class="num">${r.bruto.toFixed(2)} g</td></tr>
+    <tr><td style="text-align:left">Peso neto</td><td class="formula" style="text-align:left">pieza terminada</td><td class="num">${r.neto.toFixed(2)} g</td></tr>
+    <tr><td style="text-align:left">Desperdicio</td><td class="formula" style="text-align:left">bruto − neto</td><td class="num">${r.desp.toFixed(2)} g</td></tr>
+    <tr><td style="text-align:left">Recuperación scrap</td><td class="formula" style="text-align:left">se reinyecta</td><td class="num">${pct(p.recuperacion,0)}</td></tr>
+    <tr><td style="text-align:left">MP utilizada</td><td class="formula" style="text-align:left">neto + desp×(1−recup)</td><td class="num">${(r.mpUtil*1000).toFixed(2)} g/u</td></tr>
+    <tr class="total"><td style="text-align:left">MP utilizada</td><td></td><td class="num">${r.mpUtil.toFixed(5)} kg/u</td></tr>
+  </tbody></table></div>`;
+  const cost=`<div class="tbl-wrap"><table><thead><tr><th>Armado del costo por unidad</th><th>Cálculo</th><th>USD/u</th><th>ARS/u</th></tr></thead><tbody>
+    <tr><td style="text-align:left">Materia prima</td><td class="formula" style="text-align:left">${r.mpUtil.toFixed(5)} kg × ${usd(precioMP,2)}</td><td class="num">${usd(r.cMP,5)}</td><td class="num">${ars(r.cMP*tc)}</td></tr>
+    <tr><td style="text-align:left">Mano de obra</td><td class="formula" style="text-align:left">$${nf(MOh)}/h ÷ ${nf(r.vel)} u/h ÷ TC</td><td class="num">${usd(r.cMO,5)}</td><td class="num">${ars(r.cMO*tc)}</td></tr>
+    <tr><td style="text-align:left">Energía</td><td class="formula" style="text-align:left">MP util × ${usd(p.energia,2)}</td><td class="num">${usd(r.cEner,5)}</td><td class="num">${ars(r.cEner*tc)}</td></tr>
+    <tr><td style="text-align:left">Otros</td><td class="formula" style="text-align:left">MP util × ${usd(r.otros,2)}</td><td class="num">${usd(r.cOtros,5)}</td><td class="num">${ars(r.cOtros*tc)}</td></tr>
+    <tr class="total"><td style="text-align:left">= Costo por unidad</td><td></td><td class="num"><b>${usd(r.totalU,5)}</b></td><td class="num">${ars(r.totalU*tc)}</td></tr>
+    <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= Costo por millar</td><td class="formula" style="text-align:left">× 1000</td><td class="num"><b>${usd(r.usdMillar,2)}</b></td><td class="num">${ars(r.usdMillar*tc)}</td></tr>
+  </tbody></table></div>`;
+  return `<div style="display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(290px,1fr))">${geo}${cost}</div>`;
+}
+
+/* ---------------- Calculadora de bandejas ---------------- */
+function baCalcDefaults(){
+  const pr=S.bandejas.productos[0]||{cod:'F40',mat:'Cristal',bruto:15.6,neto:12,vel:7000,otros:0.05}, p=S.bandejas.params;
+  baCalc={ cod:pr.cod, mat:pr.mat, bruto:pr.bruto, neto:pr.neto, vel:pr.vel, otros:pr.otros,
+    mpCristal:p.mpCristal, mpNegro:p.mpNegro, recuperacion:p.recuperacion, energia:p.energia,
+    MOh:Math.round(p.salario*p.operarios*(1+p.cargas)), tc:Math.round(TC()), precio:0, qty:1000 };
+}
+function baCalcCompute(){
+  const c=baCalc, desp=c.bruto-c.neto, mpUtil=(c.neto+desp*(1-c.recuperacion))/1000;
+  const precioMP=c.mat==='Negro'?c.mpNegro:c.mpCristal;
+  const cMP=mpUtil*precioMP, cMO=(c.MOh/(c.vel||1))/(c.tc||1), cEner=mpUtil*c.energia, cOtros=mpUtil*c.otros;
+  const totalU=cMP+cMO+cEner+cOtros, usdMillar=totalU*1000;
+  const margen=c.precio?(c.precio-usdMillar)/c.precio:0;
+  return {desp,mpUtil,precioMP,cMP,cMO,cEner,cOtros,totalU,usdMillar,margen,
+    totalUSD:usdMillar*(c.qty/1000),totalARS:usdMillar*c.tc*(c.qty/1000),arsMillar:usdMillar*c.tc};
+}
+function baCalcResultHTML(){
+  const c=baCalc, r=baCalcCompute(), s=semaforo(r.margen,S.bandejas.params.semVerde,S.bandejas.params.semAmarillo);
+  const bar=breakdownBar([{label:'MP',val:r.cMP,color:'var(--teal)'},{label:'MO',val:r.cMO,color:'var(--amber)'},
+    {label:'Energía',val:r.cEner,color:'var(--blue)'},{label:'Otros',val:r.cOtros,color:'var(--muted)'}]);
+  return `
+  <div class="gauto" style="margin-bottom:14px">
+    <div class="card stat accent"><div class="card-b stat"><div class="k">Costo por millar</div><div class="v">${usd(r.usdMillar,2)}</div><div class="d">${ars(r.arsMillar)}/mil · ${usd(r.totalU,5)}/u</div></div></div>
+    <div class="card stat"><div class="card-b stat"><div class="k">Total ${nf(c.qty)} u</div><div class="v">${usd(r.totalUSD,2)}</div><div class="d">${ars(r.totalARS)}</div></div></div>
+    ${c.precio?`<div class="card stat"><div class="card-b stat"><div class="k">Margen bruto</div><div class="v" style="color:var(--${s==='v'?'green':s==='a'?'amber':'red'})">${pct(r.margen,1)}</div><div class="d">precio ${usd(c.precio,2)}/mil</div></div></div>`:''}
+  </div>
+  <div class="card"><div class="card-b">${bar}
+    <div class="tbl-wrap" style="margin-top:12px"><table><tbody>
+      <tr><td style="text-align:left">Desperdicio</td><td class="num">${r.desp.toFixed(2)} g</td><td style="text-align:left">bruto − neto</td><td></td></tr>
+      <tr><td style="text-align:left">MP utilizada</td><td class="num">${(r.mpUtil*1000).toFixed(2)} g/u</td><td style="text-align:left">× ${usd(r.precioMP,2)}</td><td class="num">${usd(r.cMP,5)}</td></tr>
+      <tr><td style="text-align:left">Mano de obra</td><td class="num"></td><td style="text-align:left">$${nf(c.MOh)}/h ÷ ${nf(c.vel)} ÷ TC</td><td class="num">${usd(r.cMO,5)}</td></tr>
+      <tr><td style="text-align:left">Energía</td><td class="num"></td><td style="text-align:left">MP × ${usd(c.energia,2)}</td><td class="num">${usd(r.cEner,5)}</td></tr>
+      <tr><td style="text-align:left">Otros</td><td class="num"></td><td style="text-align:left">MP × ${usd(c.otros,2)}</td><td class="num">${usd(r.cOtros,5)}</td></tr>
+      <tr class="total"><td style="text-align:left">= Costo / unidad</td><td></td><td></td><td class="num"><b>${usd(r.totalU,5)}</b></td></tr>
+      <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= Costo / millar</td><td></td><td class="formula" style="text-align:left">× 1000</td><td class="num"><b>${usd(r.usdMillar,2)}</b></td></tr>
+    </tbody></table></div></div></div>`;
+}
+function openBaCalc(){
+  baCalcDefaults();
+  const f=(id,lbl,unit,val,step)=>`<div class="field"><label>${lbl}<small>${unit}</small></label><div class="iw"><input type="number" ${step?'step="any"':''} id="${id}" value="${val}"></div></div>`;
+  openModal(`<div class="modal-h"><h3>🧮 Calculadora de costos — Bandejas</h3><button class="x" onclick="closeModal()">✕</button></div>
+   <div class="modal-b">
+     <div class="note" style="margin-bottom:12px">Cargá la geometría de la pieza y los parámetros de planta y mirá el costo por millar al instante. No toca tus datos; podés exportar el cálculo a Excel.</div>
+     <div class="gauto">
+       <div class="card"><div class="card-h"><h3>Pieza</h3></div>
+         <div class="card-b"><div style="display:grid;gap:10px;grid-template-columns:1fr 1fr">
+           <div class="field"><label>Material</label><div class="iw"><select id="bac_mat"><option ${baCalc.mat==='Cristal'?'selected':''}>Cristal</option><option ${baCalc.mat==='Negro'?'selected':''}>Negro</option></select></div></div>
+           ${f('bac_bruto','Peso bruto','g',baCalc.bruto,true)}
+           ${f('bac_neto','Peso neto','g',baCalc.neto,true)}
+           ${f('bac_vel','Velocidad','u/h',baCalc.vel)}
+           ${f('bac_otros','Otros','USD/kg',baCalc.otros,true)}
+           ${f('bac_recup','Recuperación','0-1',baCalc.recuperacion,true)}
+         </div></div></div>
+       <div class="card"><div class="card-h"><h3>Planta y escenario</h3></div>
+         <div class="card-b"><div style="display:grid;gap:10px">
+           ${f('bac_mpC','MP Cristal','USD/kg',baCalc.mpCristal,true)}
+           ${f('bac_mpN','MP Negro','USD/kg',baCalc.mpNegro,true)}
+           ${f('bac_ener','Energía','USD/kg',baCalc.energia,true)}
+           ${f('bac_moh','Mano de obra','ARS/h',baCalc.MOh)}
+           ${f('bac_tc','Tipo de cambio','ARS/USD',baCalc.tc)}
+           ${f('bac_precio','Precio venta (opc.)','USD/millar',baCalc.precio,true)}
+           ${f('bac_qty','Cantidad','unidades',baCalc.qty)}
+         </div></div></div>
+     </div>
+     <div id="baCalcResult" style="margin-top:14px">${baCalcResultHTML()}</div>
+   </div>
+   <div class="modal-foot"><button class="btn" id="baCalcExport">⬇ Exportar cálculo (Excel)</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`,true);
+  function readAndRender(){
+    baCalc.mat=$('#bac_mat').value; baCalc.bruto=num($('#bac_bruto').value); baCalc.neto=num($('#bac_neto').value);
+    baCalc.vel=num($('#bac_vel').value); baCalc.otros=num($('#bac_otros').value); baCalc.recuperacion=num($('#bac_recup').value);
+    baCalc.mpCristal=num($('#bac_mpC').value); baCalc.mpNegro=num($('#bac_mpN').value); baCalc.energia=num($('#bac_ener').value);
+    baCalc.MOh=num($('#bac_moh').value); baCalc.tc=num($('#bac_tc').value)||TC(); baCalc.precio=num($('#bac_precio').value); baCalc.qty=num($('#bac_qty').value);
+    $('#baCalcResult').innerHTML=baCalcResultHTML();
+  }
+  $('#bac_mat').onchange=readAndRender;
+  ['bac_bruto','bac_neto','bac_vel','bac_otros','bac_recup','bac_mpC','bac_mpN','bac_ener','bac_moh','bac_tc','bac_precio','bac_qty'].forEach(id=>$('#'+id).oninput=readAndRender);
+  $('#baCalcExport').onclick=exportBaCalc;
+}
+async function exportBaCalc(){
+  const c=baCalc, r=baCalcCompute(), wb=new ExcelJS.Workbook(), ws=wb.addWorksheet('Cálculo');
+  const H=[{t:'Concepto',k:'k',w:30},{t:'Valor',k:'v',w:16},{t:'Detalle',k:'d',w:36}];
+  petTitle(wb,ws,'Bandejas · Cálculo de costo',H.length); setCols(ws,H); headerRow(ws,4,H);
+  const rows=[
+    {k:'Material',v:c.mat,d:'MP '+usd(r.precioMP,2)+'/kg'},
+    {k:'Peso bruto / neto',v:c.bruto,d:c.neto+' g neto · desp '+r.desp.toFixed(2)+' g'},
+    {k:'MP utilizada',v:r.mpUtil,d:(r.mpUtil*1000).toFixed(2)+' g/u (recup '+pct(c.recuperacion,0)+')'},
+    {k:'Costo MP / u',v:r.cMP,d:r.mpUtil.toFixed(5)+' kg × '+usd(r.precioMP,2)},
+    {k:'Costo MO / u',v:r.cMO,d:'$'+nf(c.MOh)+'/h ÷ '+nf(c.vel)+' u/h ÷ TC '+ars(c.tc)},
+    {k:'Energía / u',v:r.cEner,d:'MP × '+usd(c.energia,2)},
+    {k:'Otros / u',v:r.cOtros,d:'MP × '+usd(c.otros,2)},
+    {k:'COSTO / UNIDAD',v:r.totalU,d:'USD/u'},
+    {k:'COSTO / MILLAR',v:r.usdMillar,d:'USD/millar · '+ars(r.arsMillar)+'/mil'},
+    {k:'Cantidad',v:c.qty,d:'unidades'},
+    {k:'TOTAL',v:r.totalUSD,d:'USD · '+ars(r.totalARS)}
+  ];
+  if(c.precio) rows.push({k:'Precio / Margen bruto',v:c.precio,d:'USD/millar · margen '+pct(r.margen,1)});
+  dataRows(ws,5,H,rows);
+  await download(wb,'Winflex_Bandejas_calculo.xlsx');
+}
+
+/* ---------------- Hojas Excel (logo + colores Winflex) ---------------- */
+function baCostRows(){ const p=S.bandejas.params;
+  return S.bandejas.productos.map(pr=>({...pr,...bandejaCost(pr)})); }
+async function baSheetCostos(wb){
+  const ws=wb.addWorksheet('Costos');
+  const H=[{t:'Cód',k:'cod',w:9},{t:'Línea',k:'linea',w:12},{t:'Material',k:'mat',w:10},{t:'Bruto g',k:'bruto',w:9,fmt:'0.00'},
+    {t:'Neto g',k:'neto',w:9,fmt:'0.00'},{t:'Desp g',k:'desp',w:9,fmt:'0.00'},{t:'Vel u/h',k:'vel',w:9,fmt:XF.int},
+    {t:'MP USD/u',k:'cMP',w:11,fmt:XF.usd4},{t:'MO USD/u',k:'cMO',w:11,fmt:XF.usd4},{t:'Energía USD/u',k:'cEner',w:12,fmt:XF.usd4},
+    {t:'Otros USD/u',k:'cOtros',w:11,fmt:XF.usd4},{t:'USD/millar',k:'usdMillar',w:12,fmt:XF.usd2}];
+  petTitle(wb,ws,'Bandejas · Costo por producto',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,baCostRows());
+}
+async function baSheetParametros(wb){
+  const p=S.bandejas.params, ws=wb.addWorksheet('Parámetros');
+  const H=[{t:'Parámetro',k:'par',w:28},{t:'Valor',k:'val',w:14},{t:'Unidad',k:'u',w:14}];
+  const rows=[{par:'MP rPET Cristal',val:p.mpCristal,u:'USD/kg'},{par:'MP rPET Negro',val:p.mpNegro,u:'USD/kg'},
+    {par:'Recuperación scrap',val:p.recuperacion,u:'0-1'},{par:'Energía',val:p.energia,u:'USD/kg'},
+    {par:'Salario operario',val:p.salario,u:'ARS/h'},{par:'Operarios',val:p.operarios,u:'pers'},
+    {par:'Cargas sociales',val:p.cargas,u:'0-1'},{par:'MO total',val:p.salario*p.operarios*(1+p.cargas),u:'ARS/h'},
+    {par:'Umbral verde',val:p.semVerde,u:'0-1'},{par:'Umbral amarillo',val:p.semAmarillo,u:'0-1'},{par:'Tipo de cambio',val:TC(),u:'ARS/USD'}];
+  petTitle(wb,ws,'Bandejas · Parámetros del costo',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+}
+async function baSheetEnsaladeras(wb){
+  const p=S.bandejas.params, ws=wb.addWorksheet('Ensaladeras precios');
+  const H=[{t:'Cliente',k:'cli',w:22},{t:'Producto',k:'cod',w:10},{t:'Moneda',k:'mon',w:9},{t:'Precio orig.',k:'val',w:13},
+    {t:'USD/millar',k:'precio',w:12,fmt:XF.usd2},{t:'Costo',k:'costo',w:12,fmt:XF.usd2},{t:'Margen %',k:'m',w:11,fmt:XF.pct,sem:true}];
+  const rows=[]; S.bandejas.ensaladeras.forEach(e=>Object.entries(e.p).forEach(([cod,val])=>{
+    const precio=e.mon==='USD'?val:val/TC(), costo=bandejaCostByCod(cod);
+    rows.push({cli:e.cli,cod,mon:e.mon,val,precio,costo,m:precio?(precio-costo)/precio:0,__sg:p.semVerde,__sa:p.semAmarillo}); }));
+  petTitle(wb,ws,'Bandejas · Ensaladeras por cliente',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+}
+async function baSheetClamshells(wb){
+  const p=S.bandejas.params, ws=wb.addWorksheet('Clamshells precios');
+  const H=[{t:'Producto',k:'cod',w:10},{t:'USD/millar',k:'val',w:12,fmt:XF.usd2},{t:'Costo',k:'costo',w:12,fmt:XF.usd2},
+    {t:'Margen USD',k:'mu',w:12,fmt:XF.usd2},{t:'Margen %',k:'m',w:11,fmt:XF.pct,sem:true}];
+  const rows=Object.entries(S.bandejas.clamshells).map(([cod,val])=>{ const costo=bandejaCostByCod(cod);
+    return {cod,val,costo,mu:val-costo,m:val?(val-costo)/val:0,__sg:p.semVerde,__sa:p.semAmarillo}; });
+  petTitle(wb,ws,'Bandejas · Clamshells (lista única)',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+}
+async function baSheetNotas(wb){
+  const ws=wb.addWorksheet('Notas');
+  const H=[{t:'Nota',k:'n',w:90}];
+  const rows=[{n:'Bandejas muestra MARGEN BRUTO sobre precio (no descuenta gastos comerciales ni Ganancias).'},
+    {n:'MP utilizada = (neto + desperdicio×(1−recuperación)) ÷ 1000. El scrap recuperado se reinyecta.'},
+    {n:'Energía y Otros se aplican sobre la MP utilizada, no sobre el peso bruto.'},
+    {n:'MO por unidad = (salario × operarios × (1+cargas)) ÷ velocidad ÷ TC.'},
+    {n:'Ensaladeras: Bandex en USD, resto en ARS convertido a USD/millar al TC vigente. Clamshells: lista única blueberry.'},
+    {n:'Semáforo: verde ≥ umbral verde; amarillo ≥ umbral amarillo; rojo por debajo.'}];
+  petTitle(wb,ws,'Bandejas · Notas y supuestos',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+}
+function openBaExportMenu(){
+  openModal(`<div class="modal-h"><h3>⬇ Exportar a Excel — Bandejas</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b"><div class="note" style="margin-bottom:14px">Elegí qué exportar. Todos los archivos usan el formato, colores y logo de Winflex.</div>
+      <div style="display:grid;gap:10px">
+        <button class="btn" id="baExpCostos" style="justify-content:flex-start;text-align:left;height:auto;padding:12px 14px">🧮 <b>Costos</b><br><span class="note">Costo por producto + parámetros de planta</span></button>
+        <button class="btn" id="baExpPrecios" style="justify-content:flex-start;text-align:left;height:auto;padding:12px 14px">🏷️ <b>Precios y márgenes</b><br><span class="note">Ensaladeras por cliente + clamshells lista única</span></button>
+        <button class="btn primary" id="baExpCompleto" style="justify-content:flex-start;text-align:left;height:auto;padding:12px 14px">📚 <b>Completo</b><br><span class="note" style="color:#dff3e7">Todas las hojas en un solo archivo</span></button>
+      </div></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cerrar</button></div>`);
+  $('#baExpCostos').onclick=()=>{ closeModal(); exportBaCostos(); };
+  $('#baExpPrecios').onclick=()=>{ closeModal(); exportBaPrecios(); };
+  $('#baExpCompleto').onclick=()=>{ closeModal(); exportBaCompleto(); };
+}
+async function exportBaCostos(){ const wb=new ExcelJS.Workbook(); await baSheetCostos(wb); await baSheetParametros(wb); await baSheetNotas(wb); await download(wb,'Winflex_Bandejas_costos.xlsx'); }
+async function exportBaPrecios(){ const wb=new ExcelJS.Workbook(); await baSheetEnsaladeras(wb); await baSheetClamshells(wb); await baSheetNotas(wb); await download(wb,'Winflex_Bandejas_precios.xlsx'); }
+async function exportBaCompleto(){ const wb=new ExcelJS.Workbook(); await baSheetCostos(wb); await baSheetParametros(wb); await baSheetEnsaladeras(wb); await baSheetClamshells(wb); await baSheetNotas(wb); await download(wb,'Winflex_Bandejas_completo.xlsx'); }
+
+/* ---------------- Historial de listas de precios (ensaladeras + clamshells) ---------------- */
+function baListSnapshot(label){
+  const p=S.bandejas.params, tc=TC();
+  const ens=[]; S.bandejas.ensaladeras.forEach(e=>Object.entries(e.p).forEach(([cod,val])=>{
+    const precio=e.mon==='USD'?val:val/tc, costo=bandejaCostByCod(cod);
+    ens.push({cli:e.cli,cod,mon:e.mon,val,precio,costo,m:precio?(precio-costo)/precio:0}); }));
+  const clam=Object.entries(S.bandejas.clamshells).map(([cod,val])=>{ const costo=bandejaCostByCod(cod);
+    return {cod,val,costo,m:val?(val-costo)/val:0}; });
+  const allM=[...ens.map(r=>r.m),...clam.map(r=>r.m)];
+  return { id:Date.now(), date:nowISO(), label:label||('Lista '+new Date().toLocaleDateString('es-AR')), tc,
+    avgMargen:allM.reduce((a,m)=>a+m,0)/(allM.length||1),
+    ensaladeras:clone(S.bandejas.ensaladeras), clamshells:clone(S.bandejas.clamshells),
+    ensView:ens, clamView:clam };
+}
+function baListSave(){
+  openModal(`<div class="modal-h"><h3>💾 Guardar lista de precios — Bandejas</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b"><div class="note" style="margin-bottom:12px">Guarda una foto de los precios actuales (ensaladeras por cliente + clamshells) y el TC. La lista vigente sigue activa; las guardadas quedan en el historial para consultar, imprimir o reactivar.</div>
+      <div class="field"><label>Etiqueta de la versión</label><div class="iw"><input id="baListLabel" type="text" placeholder="Ej: Lista temporada 2026" style="font-family:'IBM Plex Sans'"></div></div></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button><button class="btn primary" id="baListSaveBtn">Guardar versión</button></div>`);
+  $('#baListLabel').focus();
+  $('#baListSaveBtn').onclick=()=>{
+    S.bandejas.listHistory=S.bandejas.listHistory||[];
+    S.bandejas.listHistory.unshift(baListSnapshot($('#baListLabel').value.trim()));
+    if(S.bandejas.listHistory.length>50) S.bandejas.listHistory.length=50;
+    commit(); closeModal(); toast('Lista guardada','ok');
+  };
+}
+function openBaListHistory(){
+  S.bandejas.listHistory=S.bandejas.listHistory||[];
+  const cur=baListSnapshot('Lista actual (en edición)');
+  const card=(active,h)=>`
+    <div style="border:1px solid ${active?'var(--teal)':'var(--line)'};background:${active?'var(--teal-l)':'var(--card)'};border-radius:12px;padding:12px 14px;margin-bottom:10px;cursor:pointer" data-blhpdf="${active?'__cur__':h.id}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div style="text-align:left"><div style="font-weight:700;font-size:14px">${active?'<span style="color:var(--teal)">● ACTIVA</span> — ':''}${h.label}</div>
+          <div class="note" style="margin-top:2px">${active?'Se actualiza con lo que cargás en la solapa Precios':new Date(h.date).toLocaleString('es-AR')} · ${h.ensView.length} ensaladeras + ${h.clamView.length} clamshells</div></div>
+        <div style="text-align:right;white-space:nowrap"><div class="mono" style="font-size:13px">margen prom. <b>${pct(h.avgMargen,1)}</b></div>
+          <div class="note">TC ${ars(h.tc)}</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px" data-noclick>
+        <button class="btn sm" data-blpdf="${active?'__cur__':h.id}">📄 PDF</button>
+        ${active?'<span class="note" style="align-self:center">Lista en uso</span>'
+          :`<button class="btn sm primary" data-blact="${h.id}">Activar</button><button class="btn sm" data-bldel="${h.id}" style="color:var(--red)">Eliminar</button>`}
+      </div>
+    </div>`;
+  openModal(`<div class="modal-h"><h3>🕘 Historial de listas de precios — Bandejas</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b">
+      <div class="note" style="margin-bottom:12px">La tarjeta resaltada es la lista <b>activa</b> (en uso). Tocá cualquier tarjeta para abrir su PDF listo para imprimir o descargar. Usá <b>Activar</b> para volver a esa lista de precios.</div>
+      ${card(true,cur)}
+      ${S.bandejas.listHistory.length?S.bandejas.listHistory.map(h=>card(false,h)).join('')
+        :'<div class="empty" style="padding:14px">Todavía no guardaste ninguna lista. Usá “💾 Guardar lista”.</div>'}
+    </div>
+    <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`,true);
+  $$('#modal [data-blhpdf]').forEach(c=>c.onclick=e=>{ if(e.target.closest('[data-noclick]'))return; generateBaListPDF(c.dataset.blhpdf); });
+  $$('#modal [data-blpdf]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); generateBaListPDF(b.dataset.blpdf); });
+  $$('#modal [data-blact]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); const h=S.bandejas.listHistory.find(x=>x.id==b.dataset.blact); if(!h)return;
+    if(!confirm(`¿Activar “${h.label}”? Pasa a ser la lista en uso (se sobrescriben los precios actuales).`)) return;
+    S.bandejas.ensaladeras=clone(h.ensaladeras); S.bandejas.clamshells=clone(h.clamshells);
+    commit(); closeModal(); renderBandejas(); toast('Lista activada','ok'); });
+  $$('#modal [data-bldel]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); S.bandejas.listHistory=S.bandejas.listHistory.filter(x=>x.id!=b.dataset.bldel); commit(); openBaListHistory(); });
+}
+function generateBaListPDF(id){
+  if(!window.jspdf||!window.jspdf.jsPDF){ toast('Generador de PDF no disponible','err'); return; }
+  let h; if(id==='__cur__') h=baListSnapshot('Lista actual'); else { h=(S.bandejas.listHistory||[]).find(x=>x.id==id); if(!h){toast('Versión no encontrada','err');return;} }
+  const { jsPDF }=window.jspdf, doc=new jsPDF({unit:'pt',format:'a4'}), W=doc.internal.pageSize.getWidth();
+  doc.setFillColor(40,168,92); doc.rect(0,0,W,68,'F');
+  const logo=winflexLogoDataURL(); if(logo){ try{ doc.addImage(logo,/jpe?g/.test(logo)?'JPEG':'PNG',36,11,86,46); }catch(e){} }
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(15);
+  doc.text('WINFLEX S.A. — Lista de precios Bandejas', W-36, 30, {align:'right'});
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  doc.text(`${h.label} · TC ${ars(h.tc)} · ${new Date().toLocaleDateString('es-AR')}`, W-36, 48, {align:'right'});
+  doc.autoTable({ startY:84, theme:'grid', styles:{font:'helvetica',fontSize:9,cellPadding:4},
+    headStyles:{fillColor:[31,160,85],textColor:255}, alternateRowStyles:{fillColor:[244,251,246]},
+    columnStyles:{0:{halign:'left'}}, margin:{left:36,right:36},
+    head:[['ENSALADERAS','Cliente','Mon.','Precio orig.','USD/millar','Costo','Margen%']],
+    body:h.ensView.map(r=>[r.cod,r.cli,r.mon,nf(r.val),usd(r.precio,2),usd(r.costo,2),pct(r.m,1)]) });
+  doc.autoTable({ startY:doc.lastAutoTable.finalY+16, theme:'grid', styles:{font:'helvetica',fontSize:9,cellPadding:4},
+    headStyles:{fillColor:[31,160,85],textColor:255}, alternateRowStyles:{fillColor:[244,251,246]},
+    columnStyles:{0:{halign:'left'}}, margin:{left:36,right:36},
+    head:[['CLAMSHELLS','USD/millar','Costo','Margen USD','Margen%']],
+    body:h.clamView.map(r=>[r.cod,usd(r.val,2),usd(r.costo,2),usd(r.val-r.costo,2),pct(r.m,1)]) });
+  doc.setFontSize(8); doc.setTextColor(120);
+  doc.text('Winflex S.A. · Envases especiales · Bandejas termoformadas', 36, doc.internal.pageSize.getHeight()-24);
+  doc.output('dataurlnewwindow');
 }
 async function exportConsolidado(){
   const d=moduleSummary(); const wb=new ExcelJS.Workbook();

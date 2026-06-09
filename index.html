@@ -18,6 +18,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
 :root{
   --bg:#eef1f3; --card:#ffffff; --ink:#1a2622; --ink2:#48564f; --muted:#8a958f;
@@ -850,8 +852,8 @@ function renderPET(){
 
   const head=`<div class="section-head"><div><h2>PET Lámina</h2><div class="sub">${S.pet.variantes.length} variantes rPET/PET virgen · ${rows.length} clientes</div></div>
     <div class="sh-spacer"></div>
-    <button class="btn" id="petSim">📊 Simulador</button>
-    <button class="btn" id="petExport">⬇ Excel</button>
+    <button class="btn" id="petSim">🧮 Calculadora</button>
+    <button class="btn" id="petExport">⬇ Excel ▾</button>
   </div>
   ${subnav('pet',[{id:'costos',label:'🧮 Costos'},{id:'precios',label:'🏷️ Precios'}])}`;
 
@@ -1012,8 +1014,8 @@ function renderPET(){
 
   $('#page-pet').innerHTML=head+body;
   wireSub('pet',renderPET);
-  $('#petExport').onclick=exportPET;
-  $('#petSim').onclick=openPetSim;
+  $('#petExport').onclick=openPetExportMenu;
+  $('#petSim').onclick=openPetCalc;
   if(sub==='costos'){
     $$('#page-pet [data-vrow]').forEach(r=>r.onclick=()=>{ const i=+r.dataset.vrow; petVarExp.has(i)?petVarExp.delete(i):petVarExp.add(i); renderPET(); });
   } else {
@@ -1030,53 +1032,96 @@ function renderPET(){
 }
 
 /* ---- Informe PET por dimensión ---- */
+/* ============================================================
+   INFORME PET (dinámico) + HISTORIAL (PDF) + EXPORTS + CALCULADORA
+   ============================================================ */
+let petReportSort='neto', petReportAsc=false, petRepExp=new Set();
+
 function petReportGroups(dim){
   const vr=petVariantes();
   const rows=S.pet.clientes.map(c=>petClientRow(c,vr));
   const keyOf=r=> dim==='cli'?r.cli : dim==='mat'?petMaterial(r.variante) : dim==='col'?petColor(r.variante) : r.variante;
   const map={};
   rows.forEach(r=>{ const k=keyOf(r); (map[k]=map[k]||[]).push(r); });
-  return Object.keys(map).map(k=>{ const arr=map[k];
+  let g=Object.keys(map).map(k=>{ const arr=map[k];
+    const v=arr.filter(r=>r.margenNeto>=0.30).length, a=arr.filter(r=>r.margenNeto>=0.15&&r.margenNeto<0.30).length, rr=arr.filter(r=>r.margenNeto<0.15).length;
     return { grupo:k, n:arr.length,
-      precio:arr.reduce((a,r)=>a+r.precio,0)/arr.length,
-      costo:arr.reduce((a,r)=>a+r.costo,0)/arr.length,
-      neto:arr.reduce((a,r)=>a+r.margenNeto,0)/arr.length,
-      peor:Math.min.apply(null,arr.map(r=>r.margenNeto)) }; }).sort((a,b)=>b.n-a.n);
+      precio:arr.reduce((s,r)=>s+r.precio,0)/arr.length,
+      costo:arr.reduce((s,r)=>s+r.costo,0)/arr.length,
+      neto:arr.reduce((s,r)=>s+r.margenNeto,0)/arr.length,
+      peor:Math.min.apply(null,arr.map(r=>r.margenNeto)),
+      mejor:Math.max.apply(null,arr.map(r=>r.margenNeto)),
+      v,a,r:rr, rows:arr }; });
+  const key=petReportSort;
+  g.sort((x,y)=> petReportAsc ? x[key]-y[key] : y[key]-x[key]);
+  return g;
 }
 function openPetReport(){
   const dims=[['cli','Cliente'],['mat','Material'],['col','Color'],['var','Variante']];
+  const sorts=[['neto','Margen'],['precio','Precio'],['costo','Costo'],['n','Ítems']];
   const lab=dims.find(d=>d[0]===petReportDim)[1];
   const g=petReportGroups(petReportDim);
-  openModal(`<div class="modal-h"><h3>📋 Informe PET — por ${lab.toLowerCase()}</h3><button class="x" onclick="closeModal()">✕</button></div>
+  const vr=petVariantes(); const allRows=S.pet.clientes.map(c=>petClientRow(c,vr));
+  const gAvg=allRows.reduce((s,r)=>s+r.margenNeto,0)/(allRows.length||1);
+  const enRojo=allRows.filter(r=>r.margenNeto<0.15).length;
+  const best=g.reduce((m,x)=>x.neto>m.neto?x:m,g[0]||{grupo:'-',neto:0});
+  const worst=g.reduce((m,x)=>x.neto<m.neto?x:m,g[0]||{grupo:'-',neto:0});
+  const maxAbs=Math.max(0.0001,...g.map(x=>Math.abs(x.neto)));
+  const barColor=s=> s==='v'?'var(--green)':s==='a'?'var(--amber)':'var(--red)';
+
+  const bars=g.map(x=>{ const s=semaforo(x.neto); const w=Math.max(3,Math.min(100,Math.abs(x.neto)/maxAbs*100)); const open=petRepExp.has(x.grupo);
+    return `<div class="repbar" data-rgrp="${encodeURIComponent(x.grupo)}" style="cursor:pointer;display:grid;grid-template-columns:170px 1fr 92px;gap:10px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--line)">
+        <div style="text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>${x.grupo}</b> <span class="note">${x.n} cli</span></div>
+        <div style="position:relative;height:20px;background:var(--line2);border-radius:6px;overflow:hidden">
+          <div style="position:absolute;left:0;top:0;height:100%;width:${w}%;background:${barColor(s)};opacity:.85;border-radius:6px"></div>
+        </div>
+        <div style="text-align:right"><b>${pct(x.neto,1)}</b> <span class="lnk">${open?'▲':'▼'}</span></div>
+      </div>
+      ${open?`<div class="exp-row" style="display:block;padding:8px 6px"><div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Variante</th><th>Precio</th><th>Costo</th><th>M.Neto%</th><th>Estado</th></tr></thead><tbody>
+        ${x.rows.slice().sort((p,q)=>p.margenNeto-q.margenNeto).map(r=>{const ss=semaforo(r.margenNeto);
+          return `<tr><td style="text-align:left">${r.cli}</td><td style="text-align:left">${r.variante}</td><td class="num">${usd(r.precio,2)}</td><td class="num">${usd(r.costo,2)}</td><td class="num"><b>${pct(r.margenNeto,1)}</b></td><td><span class="pill ${ss}">${semLabel(ss)}</span></td></tr>`;}).join('')}
+      </tbody></table></div></div>`:''}`;}).join('');
+
+  openModal(`<div class="modal-h"><h3>📊 Informe PET — por ${lab.toLowerCase()}</h3><button class="x" onclick="closeModal()">✕</button></div>
    <div class="modal-b">
-     <div class="filterbar" style="margin:0 0 14px">
-       ${dims.map(d=>`<button class="btn sm ${petReportDim===d[0]?'primary':''}" data-rdim="${d[0]}">${d[1]}</button>`).join('')}
+     <div class="grid g4" style="margin-bottom:14px">
+       <div class="card stat accent"><div class="card-b stat"><div class="k">Clientes</div><div class="v">${allRows.length}</div><div class="d">${g.length} ${lab.toLowerCase()}s</div></div></div>
+       <div class="card stat"><div class="card-b stat"><div class="k">Margen neto prom.</div><div class="v">${pct(gAvg,1)}</div><div class="d">global</div></div></div>
+       <div class="card stat"><div class="card-b stat"><div class="k">Mejor ${lab.toLowerCase()}</div><div class="v" style="font-size:18px">${pct(best.neto,1)}</div><div class="d">${best.grupo}</div></div></div>
+       <div class="card stat"><div class="card-b stat"><div class="k">En rojo</div><div class="v">${enRojo}</div><div class="d">margen &lt; 15%</div></div></div>
      </div>
-     <div class="tbl-wrap"><table><thead><tr><th>${lab}</th><th>Ítems</th><th>Precio prom.</th><th>Costo prom.</th><th>Margen neto prom.</th><th>Peor margen</th></tr></thead><tbody>
-       ${g.map(x=>{ const s=semaforo(x.neto);
-         return `<tr><td style="text-align:left">${x.grupo}</td><td class="num">${x.n}</td><td class="num">${usd(x.precio,2)}</td>
-         <td class="num">${usd(x.costo,2)}</td><td class="num"><span class="pill ${s}">${pct(x.neto,1)}</span></td><td class="num">${pct(x.peor,1)}</td></tr>`;}).join('')}
-     </tbody></table></div>
+     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px">
+       <span class="note">Agrupar:</span>${dims.map(d=>`<button class="btn sm ${petReportDim===d[0]?'primary':''}" data-rdim="${d[0]}">${d[1]}</button>`).join('')}
+       <span class="note" style="margin-left:10px">Ordenar:</span>${sorts.map(s=>`<button class="btn sm ${petReportSort===s[0]?'primary':''}" data-rsort="${s[0]}">${s[1]}</button>`).join('')}
+       <button class="btn sm" data-rasc>${petReportAsc?'▲ asc':'▼ desc'}</button>
+     </div>
+     <div style="margin-bottom:6px">${bars||'<div class="empty">Sin datos.</div>'}</div>
+     <div class="note">Tocá una barra para ver los clientes del grupo. Color = semáforo del margen neto promedio.</div>
    </div>
-   <div class="modal-foot"><button class="btn" id="petRepExport">⬇ Exportar este informe</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
-  $$('#modal [data-rdim]').forEach(b=>b.onclick=()=>{ petReportDim=b.dataset.rdim; openPetReport(); });
+   <div class="modal-foot"><button class="btn" id="petRepExport">⬇ Exportar informe (Excel)</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
+  $$('#modal [data-rdim]').forEach(b=>b.onclick=()=>{ petReportDim=b.dataset.rdim; petRepExp.clear(); openPetReport(); });
+  $$('#modal [data-rsort]').forEach(b=>b.onclick=()=>{ petReportSort=b.dataset.rsort; openPetReport(); });
+  $('#modal [data-rasc]').onclick=()=>{ petReportAsc=!petReportAsc; openPetReport(); };
+  $$('#modal [data-rgrp]').forEach(b=>b.onclick=()=>{ const k=decodeURIComponent(b.dataset.rgrp); petRepExp.has(k)?petRepExp.delete(k):petRepExp.add(k); openPetReport(); });
   $('#petRepExport').onclick=()=>exportPetReport(petReportDim,g);
 }
 async function exportPetReport(dim,groups){
   const labels={cli:'Cliente',mat:'Material',col:'Color',var:'Variante'};
   const wb=new ExcelJS.Workbook(); const ws=wb.addWorksheet('Informe '+labels[dim]);
   const H=[{t:labels[dim],k:'grupo',w:26},{t:'Ítems',k:'n',w:9,fmt:XF.int},{t:'Precio prom.',k:'precio',w:13,fmt:XF.usd2},
-    {t:'Costo prom.',k:'costo',w:13,fmt:XF.usd2},{t:'Margen neto prom.',k:'neto',w:16,fmt:XF.pct,sem:true},{t:'Peor margen',k:'peor',w:12,fmt:XF.pct}];
+    {t:'Costo prom.',k:'costo',w:13,fmt:XF.usd2},{t:'Margen neto prom.',k:'neto',w:16,fmt:XF.pct,sem:true},
+    {t:'Peor',k:'peor',w:11,fmt:XF.pct},{t:'Mejor',k:'mejor',w:11,fmt:XF.pct},{t:'🟢',k:'v',w:6,fmt:XF.int},{t:'🟡',k:'a',w:6,fmt:XF.int},{t:'🔴',k:'r',w:6,fmt:XF.int}];
   groups.forEach(x=>{ x.__sg=0.30; x.__sa=0.15; });
   addTitle(ws,'PET Lámina · Informe por '+labels[dim],stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,groups);
   ws.views=[{state:'frozen',ySplit:4}];
+  await addLogoToSheet(wb,ws,H.length);
   await download(wb,'Winflex_PET_informe_'+dim+'.xlsx');
 }
 
 /* ---- Guardado e historial de la lista de precios PET ---- */
 function petListSave(){
   openModal(`<div class="modal-h"><h3>💾 Guardar lista de precios PET</h3><button class="x" onclick="closeModal()">✕</button></div>
-    <div class="modal-b"><div class="note" style="margin-bottom:12px">Guarda una foto de la lista PET actual (cliente, variante y precio) más el TC. La lista vigente sigue siendo la “actual”; las guardadas quedan en el historial para consultar o restaurar.</div>
+    <div class="modal-b"><div class="note" style="margin-bottom:12px">Guarda una foto de la lista PET actual (cliente, variante y precio) más el TC. La lista vigente sigue siendo la “activa”; las guardadas quedan en el historial para consultar, imprimir o reactivar.</div>
       <div class="field"><label>Etiqueta de la versión</label><div class="iw"><input id="petSnapLabel" type="text" placeholder="Ej: Lista junio 2026 post-aumento" style="font-family:'IBM Plex Sans'"></div></div></div>
     <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button><button class="btn primary" id="petSnapSave">Guardar versión</button></div>`);
   $('#petSnapLabel').focus();
@@ -1096,23 +1141,319 @@ function openPetListHistory(){
   S.pet.listHistory=S.pet.listHistory||[];
   const vr=petVariantes(); const rr=S.pet.clientes.map(c=>petClientRow(c,vr));
   const curP=rr.reduce((a,r)=>a+r.precio,0)/(rr.length||1), curN=rr.reduce((a,r)=>a+r.margenNeto,0)/(rr.length||1);
+  const card=(active,title,sub,tc,p,n,actions)=>`
+    <div class="histcard" style="border:1px solid ${active?'var(--teal)':'var(--line)'};background:${active?'var(--teal-l)':'var(--card)'};border-radius:12px;padding:12px 14px;margin-bottom:10px;cursor:pointer" ${active?'data-curpdf':'data-hpdf="'+actions+'"'}>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div style="text-align:left">
+          <div style="font-weight:700;font-size:14px">${active?'<span style="color:var(--teal)">● ACTIVA</span> — ':''}${title}</div>
+          <div class="note" style="margin-top:2px">${sub}</div>
+        </div>
+        <div style="text-align:right;white-space:nowrap">
+          <div class="mono" style="font-size:13px"><b>${usd(p,2)}</b>/kg</div>
+          <div class="note">${pct(n,1)} neto · TC ${ars(tc)}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px" data-noclick>
+        <button class="btn sm" data-pdfbtn="${active?'__cur__':actions}">📄 PDF</button>
+        ${active?'<span class="note" style="align-self:center">Esta es la lista en uso</span>'
+          :`<button class="btn sm primary" data-pact="${actions}">Activar</button><button class="btn sm" data-pdel="${actions}" style="color:var(--red)">Eliminar</button>`}
+      </div>
+    </div>`;
   openModal(`<div class="modal-h"><h3>🕘 Historial de listas PET</h3><button class="x" onclick="closeModal()">✕</button></div>
-    <div class="modal-b"><div class="tbl-wrap"><table><thead><tr><th>Versión</th><th>Fecha</th><th>TC</th><th>Precio prom.</th><th>M.Neto prom.</th><th></th></tr></thead><tbody>
-      <tr style="background:var(--teal-l)"><td style="text-align:left"><b>● Actual (en edición)</b></td><td>—</td><td class="num">${ars(TC())}</td><td class="num">${usd(curP,2)}</td><td class="num">${pct(curN,1)}</td><td></td></tr>
-      ${S.pet.listHistory.length?S.pet.listHistory.map(h=>`<tr>
-        <td style="text-align:left;white-space:normal"><b>${h.label}</b></td>
-        <td>${new Date(h.date).toLocaleDateString('es-AR')}</td>
-        <td class="num">${ars(h.tc)}</td><td class="num">${usd(h.avgPrecio,2)}</td><td class="num">${pct(h.avgNeto,1)}</td>
-        <td class="row-actions"><button class="btn sm" data-prest="${h.id}">Restaurar</button><button class="mini-x" data-pdel="${h.id}">✕</button></td></tr>`).join('')
-        :`<tr><td colspan="6" class="empty" style="padding:18px">Todavía no guardaste ninguna versión. Usá “💾 Guardar lista”.</td></tr>`}
-    </tbody></table></div>
-    <div class="note" style="margin-top:10px">Restaurar reescribe precios y variantes actuales con los de esa versión (por orden de fila). Conviene guardar la lista vigente antes.</div></div>
+    <div class="modal-b">
+      <div class="note" style="margin-bottom:12px">La tarjeta resaltada es la lista <b>activa</b> (en uso). Tocá cualquier tarjeta para abrir su PDF listo para imprimir o descargar. Usá <b>Activar</b> para cambiar la lista en uso.</div>
+      ${card(true,'Lista actual (en edición)','Se actualiza con lo que cargás en la solapa Precios',TC(),curP,curN,'')}
+      ${S.pet.listHistory.length?S.pet.listHistory.map(h=>card(false,h.label,new Date(h.date).toLocaleString('es-AR'),h.tc,h.avgPrecio,h.avgNeto,h.id)).join('')
+        :'<div class="empty" style="padding:14px">Todavía no guardaste ninguna versión. Usá “💾 Guardar lista” en la solapa Precios.</div>'}
+    </div>
     <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
-  $$('#modal [data-prest]').forEach(b=>b.onclick=()=>{ const h=S.pet.listHistory.find(x=>x.id==b.dataset.prest); if(!h)return;
-    if(!confirm(`¿Restaurar “${h.label}”? Se sobrescriben los precios PET actuales.`)) return;
+  // click en tarjeta -> PDF
+  $$('#modal [data-curpdf]').forEach(c=>c.onclick=e=>{ if(e.target.closest('[data-noclick]'))return; generatePetListPDF('__cur__'); });
+  $$('#modal [data-hpdf]').forEach(c=>c.onclick=e=>{ if(e.target.closest('[data-noclick]'))return; generatePetListPDF(c.dataset.hpdf); });
+  $$('#modal [data-pdfbtn]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); generatePetListPDF(b.dataset.pdfbtn); });
+  $$('#modal [data-pact]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); const h=S.pet.listHistory.find(x=>x.id==b.dataset.pact); if(!h)return;
+    if(!confirm(`¿Activar “${h.label}”? Pasa a ser la lista en uso (se sobrescriben precios y variantes actuales).`)) return;
     h.rows.forEach((row,i)=>{ if(S.pet.clientes[i]){ S.pet.clientes[i].act=row.act; S.pet.clientes[i].v=row.v; } });
-    commit(); closeModal(); renderPET(); toast('Lista restaurada','ok'); });
-  $$('#modal [data-pdel]').forEach(b=>b.onclick=()=>{ S.pet.listHistory=S.pet.listHistory.filter(x=>x.id!=b.dataset.pdel); commit(); openPetListHistory(); });
+    commit(); closeModal(); renderPET(); toast('Lista activada','ok'); });
+  $$('#modal [data-pdel]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); S.pet.listHistory=S.pet.listHistory.filter(x=>x.id!=b.dataset.pdel); commit(); openPetListHistory(); });
+}
+function generatePetListPDF(id){
+  if(!window.jspdf||!window.jspdf.jsPDF){ toast('Generador de PDF no disponible','err'); return; }
+  let label, tc, rows, isCur=(id==='__cur__');
+  if(isCur){ label='Lista actual'; tc=TC(); rows=S.pet.clientes.map(c=>({cli:c.cli,v:c.v,act:c.act})); }
+  else { const h=(S.pet.listHistory||[]).find(x=>x.id==id); if(!h){toast('Versión no encontrada','err');return;} label=h.label; tc=h.tc; rows=h.rows; }
+  const vr=petVariantes();
+  const { jsPDF }=window.jspdf;
+  const doc=new jsPDF({unit:'pt',format:'a4'});
+  const W=doc.internal.pageSize.getWidth();
+  // encabezado
+  doc.setFillColor(11,107,99); doc.rect(0,0,W,64,'F');
+  const logo=winflexLogoDataURL();
+  if(logo){ try{ doc.addImage(logo,/jpe?g/.test(logo)?'JPEG':'PNG', 36,12,96,40); }catch(e){} }
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(15);
+  doc.text('WINFLEX S.A. — Lista de precios PET Lámina', W-36, 28, {align:'right'});
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  doc.text(`${label} · TC ${ars(tc)} · ${new Date().toLocaleDateString('es-AR')}`, W-36, 46, {align:'right'});
+  // tabla
+  const body=rows.map(r=>{ const nom=(S.pet.variantes[r.v]||S.pet.variantes[0]).nom;
+    const row=[r.cli, nom, usd(r.act,2), ars(r.act*tc)];
+    if(isCur){ const cr=petClientRow({cli:r.cli,v:r.v,ant:r.act,act:r.act},vr); row.push(usd(cr.costo,2)); row.push(pct(cr.margenNeto,1)); }
+    return row; });
+  const head=isCur ? [['Cliente','Variante','Precio USD/kg','Precio ARS/kg','Costo USD/kg','M.Neto']]
+                   : [['Cliente','Variante','Precio USD/kg','Precio ARS/kg']];
+  doc.autoTable({ head, body, startY:80, theme:'grid', styles:{font:'helvetica',fontSize:9,cellPadding:4},
+    headStyles:{fillColor:[8,79,73],textColor:255}, alternateRowStyles:{fillColor:[244,248,247]},
+    columnStyles:{0:{halign:'left'},1:{halign:'left'}}, margin:{left:36,right:36} });
+  doc.setFontSize(8); doc.setTextColor(120);
+  doc.text('Winflex S.A. · Envases especiales · documento generado automáticamente', 36, doc.internal.pageSize.getHeight()-24);
+  doc.output('dataurlnewwindow');
+}
+
+/* ---- Logo para Excel ---- */
+function winflexLogoDataURL(){
+  const img=document.querySelector('#login .logo-img')||document.querySelector('.brand-img')||document.querySelector('.logo-img');
+  return img&&img.src&&img.src.indexOf('data:')===0 ? img.src : null;
+}
+function addLogoToSheet(wb,ws,ncols){
+  try{
+    const url=winflexLogoDataURL(); if(!url) return;
+    const base64=url.split(',')[1];
+    const ext=/image\/jpe?g/.test(url)?'jpeg':'png';
+    const imgId=wb.addImage({base64,extension:ext});
+    ws.addImage(imgId,{tl:{col:Math.max(0,ncols-2),row:0.12},ext:{width:110,height:42}});
+  }catch(e){}
+}
+
+/* ---- Constructores de hojas (reutilizados por los 3 Excel) ---- */
+async function petSheetParametros(wb){
+  const p=S.pet.params, ws=wb.addWorksheet('Parámetros');
+  const H=[{t:'Parámetro',k:'par',w:34},{t:'Valor',k:'val',w:16},{t:'Unidad',k:'uni',w:18}];
+  const rows=[
+    {par:'Tipo de cambio',val:TC(),uni:'ARS/USD'},
+    {par:'Energía',val:p.energia,uni:'USD/kg'},
+    {par:'Valor hora MO',val:p.valorHora,uni:'ARS/h'},
+    {par:'Operarios por turno',val:p.operarios,uni:'pers'},
+    {par:'Cargas sociales',val:p.cargas,uni:'×'},
+    {par:'Producción',val:p.prodHora,uni:'kg/h'},
+    {par:'Merma de proceso',val:p.merma,uni:'fracción'},
+    {par:'Recuperación',val:p.recuperacion,uni:'fracción'},
+    {par:'Merma neta',val:p.merma-p.recuperacion,uni:'fracción'},
+    {par:'Otros varios',val:p.otrosVarios,uni:'USD/kg'},
+    {par:'Otros indirectos',val:p.otrosIndirectos,uni:'USD/kg'},
+    {par:'Cono',val:p.conoARSkg,uni:'ARS/kg'},
+    {par:'Cono kg por bobina',val:p.conoKgBobina,uni:'kg'},
+    {par:'Kg bobina producida',val:p.kgBobinaProd,uni:'kg'},
+    {par:'Pallet',val:p.palletARS,uni:'ARS'},
+    {par:'Pallet capacidad',val:p.palletCap,uni:'kg'},
+    {par:'Stretch + etiquetas',val:p.stretchPct,uni:'fracción'},
+    {par:'Flete por pallet',val:p.fletePallet,uni:'ARS'},
+    {par:'% flete a cargo de Winflex',val:p.pctFlete,uni:'fracción'}
+  ];
+  addTitle(ws,'PET Lámina · Parámetros',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  await addLogoToSheet(wb,ws,H.length);
+}
+async function petSheetInsumos(wb){
+  const ws=wb.addWorksheet('Insumos'); const tc=TC();
+  const H=[{t:'Cód',k:'cod',w:9},{t:'Descripción',k:'desc',w:30},{t:'Tipo',k:'tipo',w:18},{t:'USD/kg',k:'usd',w:12,fmt:XF.usd2},{t:'ARS/kg',k:'ars',w:13,fmt:XF.ars}];
+  const rows=S.pet.insumos.map(m=>({...m,ars:m.usd*tc}));
+  addTitle(ws,'PET Lámina · Insumos / Materias primas',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  await addLogoToSheet(wb,ws,H.length);
+}
+async function petSheetCostosKg(wb){
+  const proc=petProc(), tc=TC(), ws=wb.addWorksheet('Costos por kg');
+  const tot=proc.totalCFlete||1;
+  const H=[{t:'Componente',k:'comp',w:26},{t:'USD/kg',k:'usd',w:13,fmt:XF.usd4},{t:'ARS/kg',k:'ars',w:13,fmt:XF.ars},{t:'% del costo',k:'pc',w:12,fmt:XF.pct}];
+  const comps=[['Energía',proc.energia],['Mano de obra',proc.MO],['Cono',proc.cono],['Pallet',proc.pallet],
+    ['Stretch + etiquetas',proc.stretch],['Flete',proc.flete],['Otros varios',proc.otros],['Otros indirectos',proc.indirectos]];
+  const rows=comps.map(([comp,usd])=>({comp,usd,ars:usd*tc,pc:usd/tot}));
+  addTitle(ws,'PET Lámina · Costos de procesamiento por kg',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  totalRow(ws,5+rows.length,H,{comp:'TOTAL c/flete',usd:proc.totalCFlete,ars:proc.totalCFlete*tc,pc:1});
+  totalRow(ws,6+rows.length,H,{comp:'TOTAL s/flete',usd:proc.totalSFlete,ars:proc.totalSFlete*tc});
+  await addLogoToSheet(wb,ws,H.length);
+}
+async function petSheetRecetas(wb){
+  const ws=wb.addWorksheet('Recetas');
+  const cods=S.pet.insumos.slice(0,6);
+  const H=[{t:'Variante',k:'nom',w:22}].concat(cods.map((m,i)=>({t:m.cod,k:'m'+i,w:9,fmt:XF.pct})))
+    .concat([{t:'Suma',k:'sum',w:9,fmt:XF.pct},{t:'MP base USD/kg',k:'mp',w:14,fmt:XF.usd3}]);
+  const rows=S.pet.variantes.map(v=>{ const o={nom:v.nom}; let mp=0,sum=0;
+    v.r.forEach((x,i)=>{ o['m'+i]=x; sum+=x; mp+=x*(S.pet.insumos[i]?S.pet.insumos[i].usd:0); }); o.sum=sum; o.mp=mp; return o; });
+  addTitle(ws,'PET Lámina · Recetas (composición por variante)',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  await addLogoToSheet(wb,ws,H.length);
+}
+async function petSheetVariantes(wb){
+  const vr=petVariantes(), p=S.pet.params, proc=petProc(), ws=wb.addWorksheet('Costo por Variante');
+  const factor=1/(1-(p.merma-p.recuperacion));
+  const H=[{t:'Variante',k:'nom',w:22},{t:'MP base',k:'mpBase',w:12,fmt:XF.usd3},{t:'× merma',k:'fac',w:10,fmt:'0.000'},
+    {t:'MP ajust.',k:'mpAjust',w:12,fmt:XF.usd3},{t:'Proc. c/flete',k:'proc',w:13,fmt:XF.usd3},
+    {t:'Total c/flete',k:'cFlete',w:13,fmt:XF.usd3},{t:'Total s/flete',k:'sFlete',w:13,fmt:XF.usd3},{t:'ARS/kg',k:'arsC',w:13,fmt:XF.ars}];
+  const rows=vr.map(v=>({...v,fac:factor,proc:proc.totalCFlete}));
+  addTitle(ws,'PET Lámina · Costo por variante',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  await addLogoToSheet(wb,ws,H.length);
+}
+async function petSheetClientes(wb){
+  const vr=petVariantes(), ws=wb.addWorksheet('Resumen Clientes');
+  const rows=S.pet.clientes.map(c=>{ const r=petClientRow(c,vr); return {...r, __sg:0.30, __sa:0.15}; });
+  const H=[{t:'Cliente',k:'cli',w:22},{t:'Variante',k:'variante',w:18},{t:'P. anterior',k:'ant',w:12,fmt:XF.usd2},
+    {t:'P. actual',k:'precio',w:12,fmt:XF.usd2},{t:'Aumento',k:'aumento',w:10,fmt:XF.pct},{t:'Costo',k:'costo',w:12,fmt:XF.usd2},
+    {t:'M. Bruto',k:'margenBruto',w:10,fmt:XF.pct},{t:'M. Neto USD',k:'netoUSD',w:12,fmt:XF.usd2},{t:'M. Neto %',k:'margenNeto',w:11,fmt:XF.pct,sem:true}];
+  addTitle(ws,'PET Lámina · Resumen de clientes (lista de precios)',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  const n=rows.length||1;
+  totalRow(ws,5+rows.length,H,{cli:'PROMEDIO',precio:rows.reduce((a,r)=>a+r.precio,0)/n,costo:rows.reduce((a,r)=>a+r.costo,0)/n,
+    margenBruto:rows.reduce((a,r)=>a+r.margenBruto,0)/n,netoUSD:rows.reduce((a,r)=>a+r.netoUSD,0)/n,margenNeto:rows.reduce((a,r)=>a+r.margenNeto,0)/n});
+  ws.views=[{state:'frozen',ySplit:4}];
+  await addLogoToSheet(wb,ws,H.length);
+}
+async function petSheetNotas(wb){
+  const n=S.pet.net, ws=wb.addWorksheet('Notas');
+  const H=[{t:'Notas y supuestos',k:'n',w:90}];
+  const rows=[
+    {n:'Costo de procesamiento = energía + mano de obra + cono + pallet + stretch + flete + otros + indirectos.'},
+    {n:'MP ajustada = MP base ÷ (1 − merma neta). Merma neta = merma de proceso − recuperación.'},
+    {n:'Costo final por variante = MP ajustada + costo de procesamiento (con o sin flete).'},
+    {n:`Margen neto = precio − costo − gastos − Ganancias. Gastos sobre venta: Admin ${pct(n.admin,1)}, IIBB ${pct(n.iibb,1)}, DyC ${pct(n.dyc,1)}, Financieros ${pct(n.financiero,1)}. Imp. Ganancias ${pct(n.ganancias,0)}.`},
+    {n:'Semáforo: 🟢 ≥ 30% · 🟡 15–30% · 🔴 < 15% (sobre margen neto).'},
+    {n:'Generado automáticamente desde la app de Costos & Precios de Winflex.'}
+  ];
+  addTitle(ws,'PET Lámina · Notas',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  await addLogoToSheet(wb,ws,H.length);
+}
+
+async function exportPetCostos(){
+  const wb=new ExcelJS.Workbook();
+  await petSheetParametros(wb); await petSheetInsumos(wb); await petSheetCostosKg(wb);
+  await petSheetRecetas(wb); await petSheetVariantes(wb); await petSheetNotas(wb);
+  await download(wb,'Winflex_PET_Costos.xlsx');
+}
+async function exportPetPrecios(){
+  const wb=new ExcelJS.Workbook();
+  await petSheetClientes(wb); await petSheetNotas(wb);
+  await download(wb,'Winflex_PET_Lista_Precios.xlsx');
+}
+async function exportPetCompleto(){
+  const wb=new ExcelJS.Workbook();
+  await petSheetParametros(wb); await petSheetInsumos(wb); await petSheetCostosKg(wb);
+  await petSheetRecetas(wb); await petSheetVariantes(wb); await petSheetClientes(wb); await petSheetNotas(wb);
+  await download(wb,'Winflex_PET_Completo.xlsx');
+}
+function openPetExportMenu(){
+  openModal(`<div class="modal-h"><h3>⬇ Descargar Excel — PET Lámina</h3><button class="x" onclick="closeModal()">✕</button></div>
+   <div class="modal-b"><div class="note" style="margin-bottom:14px">Tres archivos por separado, todos con el logo de Winflex.</div>
+     <button class="btn" id="dlCostos" style="display:block;width:100%;text-align:left;margin-bottom:10px">🧮 <b>Costos</b> — parámetros, insumos, costos por kg, recetas y costo por variante</button>
+     <button class="btn" id="dlPrecios" style="display:block;width:100%;text-align:left;margin-bottom:10px">🏷️ <b>Lista de precios</b> — clientes, márgenes y semáforo</button>
+     <button class="btn" id="dlCompleto" style="display:block;width:100%;text-align:left">📘 <b>Completo</b> — todo junto (mismo formato del Excel base)</button>
+   </div>
+   <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
+  $('#dlCostos').onclick=()=>{ closeModal(); exportPetCostos(); };
+  $('#dlPrecios').onclick=()=>{ closeModal(); exportPetPrecios(); };
+  $('#dlCompleto').onclick=()=>{ closeModal(); exportPetCompleto(); };
+}
+
+/* ============================================================
+   CALCULADORA DE COSTOS PET (en el momento)
+   ============================================================ */
+let petCalc=null;
+function petCalcDefaults(){
+  const p=S.pet.params, proc=petProc();
+  petCalc={ vi:0, r:S.pet.variantes[0].r.slice(0,6),
+    mp:S.pet.insumos.slice(0,6).map(i=>i.usd),
+    tc:Math.round(TC()), merma:(p.merma-p.recuperacion), proc:proc.totalCFlete, flete:true, qty:1000 };
+}
+function petCalcCompute(){
+  const c=petCalc; let mpBase=0; c.r.forEach((x,i)=>mpBase+=x*(c.mp[i]||0));
+  const factor=1/(1-c.merma); const mpAjust=mpBase*factor;
+  const costoU=mpAjust+c.proc; const sum=c.r.reduce((a,x)=>a+x,0);
+  return {mpBase,factor,mpAjust,proc:c.proc,costoU,arsU:costoU*c.tc,sum,
+    totalUSD:costoU*c.qty,totalARS:costoU*c.tc*c.qty};
+}
+function petCalcResultHTML(){
+  const c=petCalc, r=petCalcCompute();
+  const ok=Math.abs(r.sum-1)<0.001;
+  const cods=S.pet.insumos.slice(0,6);
+  const aportes=c.r.map((x,i)=>({label:cods[i].cod,val:x*(c.mp[i]||0),color:['var(--amber)','#d6a96d','var(--blue)','#9b6dd6','#444','#2c74c4'][i]||'var(--muted)'}));
+  const bar=breakdownBar([{label:'MP ajustada',val:r.mpAjust,color:'var(--amber)'},{label:'Procesamiento',val:r.proc,color:'var(--teal)'}]);
+  return `
+  <div class="grid g2" style="margin-bottom:14px">
+    <div class="card stat accent"><div class="card-b stat"><div class="k">Costo unitario ${c.flete?'c/flete':'s/flete'}</div>
+      <div class="v">${usd(r.costoU,3)}<small>/kg</small></div><div class="d">${ars(r.arsU)}/kg</div></div></div>
+    <div class="card stat"><div class="card-b stat"><div class="k">Total ${nf(c.qty)} kg</div>
+      <div class="v">${usd(r.totalUSD,2)}</div><div class="d">${ars(r.totalARS)}</div></div></div>
+  </div>
+  ${!ok?`<div class="banner warn" style="margin-bottom:12px">⚠ La receta suma ${pct(r.sum,0)} (debería ser 100%).</div>`:''}
+  <div class="card" style="margin-bottom:12px"><div class="card-b">${bar}
+    <div class="tbl-wrap" style="margin-top:12px"><table><tbody>
+      ${c.r.map((x,i)=>x>0?`<tr><td style="text-align:left"><span class="chip">${cods[i].cod}</span> ${cods[i].desc}</td><td class="num">${pct(x,0)}</td><td class="num">${usd(c.mp[i],2)}</td><td class="num">${usd(x*(c.mp[i]||0),3)}</td></tr>`:'').join('')}
+      <tr class="total"><td style="text-align:left">MP base</td><td></td><td></td><td class="num">${usd(r.mpBase,3)}</td></tr>
+      <tr><td style="text-align:left">× factor merma (1 ÷ (1 − ${pct(c.merma,0)}))</td><td></td><td></td><td class="num">× ${r.factor.toFixed(3)}</td></tr>
+      <tr class="total"><td style="text-align:left">MP ajustada</td><td></td><td></td><td class="num">${usd(r.mpAjust,3)}</td></tr>
+      <tr><td style="text-align:left">+ Procesamiento ${c.flete?'c/flete':'s/flete'}</td><td></td><td></td><td class="num">${usd(r.proc,3)}</td></tr>
+      <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= Costo unitario</td><td></td><td></td><td class="num"><b>${usd(r.costoU,3)}</b></td></tr>
+    </tbody></table></div></div></div>`;
+}
+function openPetCalc(){
+  petCalcDefaults();
+  const cods=S.pet.insumos.slice(0,6);
+  openModal(`<div class="modal-h"><h3>🧮 Calculadora de costos — PET Lámina</h3><button class="x" onclick="closeModal()">✕</button></div>
+   <div class="modal-b">
+     <div class="note" style="margin-bottom:12px">Armá una receta y un escenario y mirá el costo al instante. No toca tus datos; podés exportar el cálculo a Excel.</div>
+     <div class="grid g2">
+       <div class="card"><div class="card-h"><h3>Receta</h3>
+         <select id="calcVar" style="margin-left:auto">${S.pet.variantes.map((v,i)=>`<option value="${i}">${v.nom}</option>`).join('')}<option value="-1">Personalizada</option></select></div>
+         <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>MP</th><th>USD/kg</th><th>% mezcla</th></tr></thead><tbody>
+           ${cods.map((m,i)=>`<tr><td style="text-align:left"><span class="chip">${m.cod}</span> <span class="note">${m.desc}</span></td>
+             <td>${nInp('','',{w:74}).replace('data-path=""','id="calc_mp_'+i+'"').replace('value=""','value="'+m.usd+'"')}</td>
+             <td>${nInp('','',{w:64}).replace('data-path=""','id="calc_pct_'+i+'"').replace('value=""','value="'+(S.pet.variantes[0].r[i]*100)+'"')}</td></tr>`).join('')}
+         </tbody></table></div></div></div>
+       <div class="card"><div class="card-h"><h3>Escenario</h3></div>
+         <div class="card-b"><div class="params-grid">
+           <div class="field"><label>Tipo de cambio<small>ARS/USD</small></label><div class="iw"><input type="number" id="calc_tc" value="${petCalc.tc}"></div></div>
+           <div class="field"><label>Merma neta<small>%</small></label><div class="iw"><input type="number" id="calc_merma" value="${(petCalc.merma*100).toFixed(1)}"></div></div>
+           <div class="field"><label>Procesamiento<small>USD/kg</small></label><div class="iw"><input type="number" step="any" id="calc_proc" value="${petCalc.proc.toFixed(4)}"></div></div>
+           <div class="field"><label>Cantidad<small>kg</small></label><div class="iw"><input type="number" id="calc_qty" value="${petCalc.qty}"></div></div>
+         </div>
+         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);margin-top:6px">
+           <input type="checkbox" id="calc_flete" checked> Incluir flete (al destildar usa procesamiento s/flete)</label>
+         </div></div>
+     </div>
+     <div id="calcResult" style="margin-top:14px">${petCalcResultHTML()}</div>
+   </div>
+   <div class="modal-foot"><button class="btn" id="calcExport">⬇ Exportar cálculo (Excel)</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
+
+  function readAndRender(){
+    for(let i=0;i<6;i++){ petCalc.mp[i]=num($('#calc_mp_'+i).value); petCalc.r[i]=num($('#calc_pct_'+i).value)/100; }
+    petCalc.tc=num($('#calc_tc').value)||TC();
+    petCalc.merma=num($('#calc_merma').value)/100;
+    petCalc.proc=num($('#calc_proc').value);
+    petCalc.qty=num($('#calc_qty').value);
+    petCalc.flete=$('#calc_flete').checked;
+    $('#calcResult').innerHTML=petCalcResultHTML();
+  }
+  $('#calcVar').onchange=e=>{ const i=+e.target.value;
+    if(i>=0){ S.pet.variantes[i].r.slice(0,6).forEach((x,j)=>{ $('#calc_pct_'+j).value=+(x*100).toFixed(2); }); }
+    readAndRender();
+  };
+  $('#calc_flete').onchange=()=>{ const proc=petProc(); $('#calc_proc').value=(($('#calc_flete').checked?proc.totalCFlete:proc.totalSFlete)).toFixed(4); readAndRender(); };
+  ['calc_tc','calc_merma','calc_proc','calc_qty'].forEach(id=>$('#'+id).oninput=readAndRender);
+  for(let i=0;i<6;i++){ $('#calc_mp_'+i).oninput=readAndRender; $('#calc_pct_'+i).oninput=readAndRender; }
+  $('#calcExport').onclick=exportPetCalc;
+}
+async function exportPetCalc(){
+  const c=petCalc, r=petCalcCompute(), cods=S.pet.insumos.slice(0,6), wb=new ExcelJS.Workbook(), ws=wb.addWorksheet('Cálculo');
+  const H=[{t:'Concepto',k:'k',w:34},{t:'Valor',k:'v',w:16},{t:'Detalle',k:'d',w:30}];
+  addTitle(ws,'PET Lámina · Cálculo de costo',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H);
+  const rows=[];
+  cods.forEach((m,i)=>{ if(c.r[i]>0) rows.push({k:m.cod+' · '+m.desc, v:c.mp[i], d:pct(c.r[i],0)+' · aporte '+usd(c.r[i]*c.mp[i],3)}); });
+  rows.push({k:'MP base',v:r.mpBase,d:'USD/kg'});
+  rows.push({k:'Factor merma neta',v:r.factor,d:'1 ÷ (1 − '+pct(c.merma,0)+')'});
+  rows.push({k:'MP ajustada',v:r.mpAjust,d:'USD/kg'});
+  rows.push({k:'Procesamiento '+(c.flete?'c/flete':'s/flete'),v:r.proc,d:'USD/kg'});
+  rows.push({k:'COSTO UNITARIO',v:r.costoU,d:'USD/kg · '+ars(r.arsU)+'/kg'});
+  rows.push({k:'Tipo de cambio',v:c.tc,d:'ARS/USD'});
+  rows.push({k:'Cantidad',v:c.qty,d:'kg'});
+  rows.push({k:'TOTAL',v:r.totalUSD,d:'USD · '+ars(r.totalARS)});
+  dataRows(ws,5,H,rows);
+  await addLogoToSheet(wb,ws,H.length);
+  await download(wb,'Winflex_PET_calculo.xlsx');
 }
 
 /* ============================================================

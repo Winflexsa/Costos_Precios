@@ -268,7 +268,7 @@ td .formula{display:block;margin-top:3px;white-space:normal}
 <!-- APP -->
 <div id="app">
   <header class="top">
-    <div class="brand"><svg class="brand-img" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Winflex Costos y Precios"><defs><linearGradient id="wfLogo" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#0E7A3A"/><stop offset="0.55" stop-color="#28A058"/><stop offset="1" stop-color="#38B860"/></linearGradient></defs><g stroke="url(#wfLogo)" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"><path d="M92 104h150a14 14 0 0 1 14 14v206a14 14 0 0 1-14 14H106a14 14 0 0 1-14-14V104z"/><path d="M168 150v74"/><path d="M186 165a22 16 0 0 0-36 11 22 16 0 0 0 36 11 22 16 0 0 1-36 11"/><path d="M150 258h56M124 290h82M124 318h52"/><circle cx="356" cy="120" r="46"/><circle cx="356" cy="120" r="18"/><path d="M356 58v16M356 166v16M418 120h-16M310 120h-16M400 76l-11 11M323 153l-11 11M400 164l-11-11M323 87l-11-11"/><rect x="262" y="216" width="170" height="224" rx="22"/><rect x="286" y="246" width="122" height="44" rx="8"/><path d="M306 338h24M318 326v24"/><path d="M366 338h24"/><path d="M300 398l22 22M322 398l-22 22"/><path d="M366 392h24M366 414h24"/><circle cx="120" cy="392" r="60"/><path d="M120 360v64"/><path d="M134 374a16 11 0 0 0-28 8 16 11 0 0 0 28 8 16 11 0 0 1-28 8"/></g></svg><small>Costos &amp; Precios</small></div>
+    <div class="brand"><img class="brand-img" alt="Winflex S.A."><small>Costos &amp; Precios</small></div>
     <div class="top-spacer"></div>
     <div class="tc-box">
       <div class="lab">TC oper.<b id="tcSrc">manual</b></div>
@@ -973,7 +973,17 @@ function renderPET(){
       </tbody></table></div>
       <div class="note" style="margin-top:8px">Cada celda es el % del insumo en la mezcla. MP01-MP06 = preforma molida, scrap, virgen, master blanco, negro, azulino. La columna MP base es el costo de materia prima antes de ajustar por merma.</div></div></div>`;
 
+    const ppAvg=vr.reduce((a,v)=>a+v.cFlete,0)/(vr.length||1);
+    const mpAvg=vr.reduce((a,v)=>a+v.mpAjust,0)/(vr.length||1);
+
     body=`
+    <div class="grid g4" style="margin-bottom:16px">
+      <div class="card stat accent"><div class="k">Costo prom. variante</div><div class="v">${usd(ppAvg,3)}<small>/kg</small></div><div class="d">${vr.length} variantes · ${ars(ppAvg*tc)}/kg</div></div>
+      <div class="card stat"><div class="k">Costo de proceso</div><div class="v">${usd(proc.totalCFlete,3)}<small>/kg</small></div><div class="d">c/flete · común a todas</div></div>
+      <div class="card stat"><div class="k">MP promedio ajustada</div><div class="v">${usd(mpAvg,3)}<small>/kg</small></div><div class="d">merma neta ${pct(p.merma-p.recuperacion,0)}</div></div>
+      <div class="card stat"><div class="k">Rango de costo</div><div class="v">${usd(cheap.cFlete,2)}<small>–${usd(dear.cFlete,2)}</small></div><div class="d">${cheap.nom} → ${dear.nom}</div></div>
+    </div>
+
     ${hero}
 
     <div style="margin-bottom:16px">${anatomyCard('Anatomía del costo de procesamiento (común a todas las variantes)',parts,'Total procesamiento c/flete',{tag:`merma neta ${pct(p.merma-p.recuperacion,0)} · TC ${ars(tc)}`,dec:4})}</div>
@@ -3295,6 +3305,8 @@ function setTab(tab){
 }
 
 function init(){
+  const _bi=document.querySelector('.brand-img'),_li=document.querySelector('#login .logo-img');
+  if(_bi&&_li&&_li.src) _bi.src=_li.src;
   const inp=$('#pinInput');
   $('#pinGo').onclick=tryLogin;
   inp.addEventListener('keydown',e=>{ if(e.key==='Enter') tryLogin(); });

@@ -1192,13 +1192,13 @@ function generatePetListPDF(id){
   const doc=new jsPDF({unit:'pt',format:'a4'});
   const W=doc.internal.pageSize.getWidth();
   // encabezado
-  doc.setFillColor(11,107,99); doc.rect(0,0,W,64,'F');
+  doc.setFillColor(31,160,85); doc.rect(0,0,W,68,'F');
   const logo=winflexLogoDataURL();
-  if(logo){ try{ doc.addImage(logo,/jpe?g/.test(logo)?'JPEG':'PNG', 36,12,96,40); }catch(e){} }
+  if(logo){ try{ doc.addImage(logo,/jpe?g/.test(logo)?'JPEG':'PNG', 36,11,86,46); }catch(e){} }
   doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(15);
-  doc.text('WINFLEX S.A. — Lista de precios PET Lámina', W-36, 28, {align:'right'});
+  doc.text('WINFLEX S.A. — Lista de precios PET Lámina', W-36, 30, {align:'right'});
   doc.setFont('helvetica','normal'); doc.setFontSize(10);
-  doc.text(`${label} · TC ${ars(tc)} · ${new Date().toLocaleDateString('es-AR')}`, W-36, 46, {align:'right'});
+  doc.text(`${label} · TC ${ars(tc)} · ${new Date().toLocaleDateString('es-AR')}`, W-36, 48, {align:'right'});
   // tabla
   const body=rows.map(r=>{ const nom=(S.pet.variantes[r.v]||S.pet.variantes[0]).nom;
     const row=[r.cli, nom, usd(r.act,2), ars(r.act*tc)];
@@ -1206,8 +1206,8 @@ function generatePetListPDF(id){
     return row; });
   const head=isCur ? [['Cliente','Variante','Precio USD/kg','Precio ARS/kg','Costo USD/kg','M.Neto']]
                    : [['Cliente','Variante','Precio USD/kg','Precio ARS/kg']];
-  doc.autoTable({ head, body, startY:80, theme:'grid', styles:{font:'helvetica',fontSize:9,cellPadding:4},
-    headStyles:{fillColor:[8,79,73],textColor:255}, alternateRowStyles:{fillColor:[244,248,247]},
+  doc.autoTable({ head, body, startY:84, theme:'grid', styles:{font:'helvetica',fontSize:9,cellPadding:4},
+    headStyles:{fillColor:[14,122,58],textColor:255}, alternateRowStyles:{fillColor:[244,251,246]},
     columnStyles:{0:{halign:'left'},1:{halign:'left'}}, margin:{left:36,right:36} });
   doc.setFontSize(8); doc.setTextColor(120);
   doc.text('Winflex S.A. · Envases especiales · documento generado automáticamente', 36, doc.internal.pageSize.getHeight()-24);
@@ -1397,11 +1397,16 @@ function openPetCalc(){
      <div class="gauto">
        <div class="card"><div class="card-h"><h3>Receta</h3>
          <select id="calcVar" style="margin-left:auto">${S.pet.variantes.map((v,i)=>`<option value="${i}">${v.nom}</option>`).join('')}<option value="-1">Personalizada</option></select></div>
-         <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>MP</th><th>USD/kg</th><th>%</th></tr></thead><tbody>
-           ${cods.map((m,i)=>`<tr><td style="text-align:left"><span class="chip">${m.cod}</span> <span class="note">${m.desc}</span></td>
-             <td>${nInp('','',{w:66}).replace('data-path=""','id="calc_mp_'+i+'"').replace('value=""','value="'+m.usd+'"')}</td>
-             <td>${nInp('','',{w:54}).replace('data-path=""','id="calc_pct_'+i+'"').replace('value=""','value="'+(S.pet.variantes[0].r[i]*100)+'"')}</td></tr>`).join('')}
-         </tbody></table></div></div></div>
+         <div class="card-b">
+           <div style="display:flex;gap:8px;color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;padding:0 2px 6px">
+             <span style="flex:1">Materia prima</span><span style="width:66px;text-align:center">USD/kg</span><span style="width:48px;text-align:center">%</span></div>
+           ${cods.map((m,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid var(--line2)">
+             <span class="chip">${m.cod}</span>
+             <span class="note" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.desc}</span>
+             <input id="calc_mp_${i}" class="tinp" type="number" step="any" value="${m.usd}" style="width:66px;flex:none;text-align:right">
+             <input id="calc_pct_${i}" class="tinp" type="number" step="any" value="${+(S.pet.variantes[0].r[i]*100).toFixed(2)}" style="width:48px;flex:none;text-align:right">
+           </div>`).join('')}
+         </div></div>
        <div class="card"><div class="card-h"><h3>Escenario</h3></div>
          <div class="card-b"><div style="display:grid;gap:10px">
            <div class="field"><label>Tipo de cambio<small>ARS/USD</small></label><div class="iw"><input type="number" id="calc_tc" value="${petCalc.tc}"></div></div>
@@ -2037,16 +2042,16 @@ function openSettings(){
    EXPORT EXCEL (ExcelJS · formato ejecutivo)
    ============================================================ */
 const XF={ usd2:'"US$"#,##0.00', usd3:'"US$"#,##0.000', usd4:'"US$"#,##0.0000', ars:'"$"#,##0', pct:'0.0%', int:'#,##0' };
-const CLR={ teal:'FF1A472A', tealD:'FF2E9E5B', tealL:'FFEAF5EE', amber:'FFC8761A', amberL:'FFFBF0E2',
+const CLR={ teal:'FF1FA055', tealD:'FF0E7A3A', tealL:'FFEAF6EF', amber:'FFC8761A', amberL:'FFFBF0E2',
   green:'FFE7F6EE', greenT:'FF1F8F4E', yellow:'FFFCF4DD', yellowT:'FFB07D06', red:'FFFBE9E9', redT:'FFD64545',
-  ink:'FF15201F', muted:'FF7E8A85', line:'FFDDE3E6', white:'FFFFFFFF', zebra:'FFF3FAF5' };
+  ink:'FF15201F', muted:'FF6B7280', line:'FFDDE3E6', white:'FFFFFFFF', zebra:'FFF4FBF6' };
 
 function fill(c){ return {type:'pattern',pattern:'solid',fgColor:{argb:c}}; }
 function thinBorder(){ const s={style:'thin',color:{argb:CLR.line}}; return {top:s,left:s,bottom:s,right:s}; }
 
 /* Encabezado PET: logo limpio sobre blanco (fila 1) + barra verde Winflex (fila 2) + subtítulo (fila 3) */
 function petTitle(wb,ws,title,ncols){
-  ws.getRow(1).height=40;
+  ws.getRow(1).height=50;
   for(let i=1;i<=ncols;i++){ const c=ws.getCell(1,i); c.fill=fill(CLR.white);
     c.border={bottom:{style:'thin',color:{argb:CLR.tealL}}}; }
   ws.mergeCells(2,1,2,ncols);
@@ -2056,7 +2061,7 @@ function petTitle(wb,ws,title,ncols){
   const s=ws.getCell(3,1); s.value=stamp(); s.font={name:'Arial',size:9,italic:true,color:{argb:CLR.muted}};
   s.fill=fill(CLR.tealL); s.alignment={horizontal:'left',indent:1}; ws.getRow(3).height=16;
   try{ const url=winflexLogoDataURL(); if(url){ const b64=url.split(',')[1]; const ext=/image\/jpe?g/.test(url)?'jpeg':'png';
-    const id=wb.addImage({base64:b64,extension:ext}); ws.addImage(id,{tl:{col:0.22,row:0.18},ext:{width:104,height:30}}); } }catch(e){}
+    const id=wb.addImage({base64:b64,extension:ext}); ws.addImage(id,{tl:{col:0.25,row:0.12},ext:{width:92,height:49}}); } }catch(e){}
 }
 function addTitle(ws,title,sub,ncols){
   ws.mergeCells(1,1,1,ncols);

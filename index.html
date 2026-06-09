@@ -175,7 +175,13 @@ table tr.total td{font-weight:700;background:var(--teal-l);border-top:1.5px soli
 /* modal */
 .modal-bg{position:fixed;inset:0;background:rgba(15,30,28,.5);backdrop-filter:blur(3px);z-index:150;display:none;align-items:center;justify-content:center;padding:20px}
 .modal-bg.open{display:flex}
-.modal{background:var(--card);border-radius:18px;width:100%;max-width:560px;max-height:88vh;overflow:auto;box-shadow:var(--shadow-lg);animation:pop .22s ease}
+.modal{background:var(--card);border-radius:18px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;overflow-x:hidden;box-shadow:var(--shadow-lg);animation:pop .22s ease}
+.modal.wide{max-width:840px}
+@media(max-width:900px){.modal.wide{max-width:560px}}
+.gauto{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.gauto>*{min-width:0}
+.gkpi{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.gkpi>*{min-width:0}
 @keyframes pop{from{opacity:0;transform:scale(.96) translateY(8px)}to{opacity:1;transform:none}}
 .modal-h{padding:20px 22px 0;display:flex;align-items:flex-start;gap:12px}
 .modal-h h3{font-size:19px;flex:1}
@@ -1084,7 +1090,7 @@ function openPetReport(){
 
   openModal(`<div class="modal-h"><h3>📊 Informe PET — por ${lab.toLowerCase()}</h3><button class="x" onclick="closeModal()">✕</button></div>
    <div class="modal-b">
-     <div class="grid g4" style="margin-bottom:14px">
+     <div class="gkpi" style="margin-bottom:14px">
        <div class="card stat accent"><div class="card-b stat"><div class="k">Clientes</div><div class="v">${allRows.length}</div><div class="d">${g.length} ${lab.toLowerCase()}s</div></div></div>
        <div class="card stat"><div class="card-b stat"><div class="k">Margen neto prom.</div><div class="v">${pct(gAvg,1)}</div><div class="d">global</div></div></div>
        <div class="card stat"><div class="card-b stat"><div class="k">Mejor ${lab.toLowerCase()}</div><div class="v" style="font-size:18px">${pct(best.neto,1)}</div><div class="d">${best.grupo}</div></div></div>
@@ -1098,7 +1104,7 @@ function openPetReport(){
      <div style="margin-bottom:6px">${bars||'<div class="empty">Sin datos.</div>'}</div>
      <div class="note">Tocá una barra para ver los clientes del grupo. Color = semáforo del margen neto promedio.</div>
    </div>
-   <div class="modal-foot"><button class="btn" id="petRepExport">⬇ Exportar informe (Excel)</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
+   <div class="modal-foot"><button class="btn" id="petRepExport">⬇ Exportar informe (Excel)</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`,true);
   $$('#modal [data-rdim]').forEach(b=>b.onclick=()=>{ petReportDim=b.dataset.rdim; petRepExp.clear(); openPetReport(); });
   $$('#modal [data-rsort]').forEach(b=>b.onclick=()=>{ petReportSort=b.dataset.rsort; openPetReport(); });
   $('#modal [data-rasc]').onclick=()=>{ petReportAsc=!petReportAsc; openPetReport(); };
@@ -1112,9 +1118,8 @@ async function exportPetReport(dim,groups){
     {t:'Costo prom.',k:'costo',w:13,fmt:XF.usd2},{t:'Margen neto prom.',k:'neto',w:16,fmt:XF.pct,sem:true},
     {t:'Peor',k:'peor',w:11,fmt:XF.pct},{t:'Mejor',k:'mejor',w:11,fmt:XF.pct},{t:'🟢',k:'v',w:6,fmt:XF.int},{t:'🟡',k:'a',w:6,fmt:XF.int},{t:'🔴',k:'r',w:6,fmt:XF.int}];
   groups.forEach(x=>{ x.__sg=0.30; x.__sa=0.15; });
-  addTitle(ws,'PET Lámina · Informe por '+labels[dim],stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,groups);
+  petTitle(wb,ws,'PET Lámina · Informe por '+labels[dim],H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,groups);
   ws.views=[{state:'frozen',ySplit:4}];
-  await addLogoToSheet(wb,ws,H.length);
   await download(wb,'Winflex_PET_informe_'+dim+'.xlsx');
 }
 
@@ -1249,15 +1254,13 @@ async function petSheetParametros(wb){
     {par:'Flete por pallet',val:p.fletePallet,uni:'ARS'},
     {par:'% flete a cargo de Winflex',val:p.pctFlete,uni:'fracción'}
   ];
-  addTitle(ws,'PET Lámina · Parámetros',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
-  await addLogoToSheet(wb,ws,H.length);
+  petTitle(wb,ws,'PET Lámina · Parámetros',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
 }
 async function petSheetInsumos(wb){
   const ws=wb.addWorksheet('Insumos'); const tc=TC();
   const H=[{t:'Cód',k:'cod',w:9},{t:'Descripción',k:'desc',w:30},{t:'Tipo',k:'tipo',w:18},{t:'USD/kg',k:'usd',w:12,fmt:XF.usd2},{t:'ARS/kg',k:'ars',w:13,fmt:XF.ars}];
   const rows=S.pet.insumos.map(m=>({...m,ars:m.usd*tc}));
-  addTitle(ws,'PET Lámina · Insumos / Materias primas',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
-  await addLogoToSheet(wb,ws,H.length);
+  petTitle(wb,ws,'PET Lámina · Insumos / Materias primas',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
 }
 async function petSheetCostosKg(wb){
   const proc=petProc(), tc=TC(), ws=wb.addWorksheet('Costos por kg');
@@ -1266,10 +1269,9 @@ async function petSheetCostosKg(wb){
   const comps=[['Energía',proc.energia],['Mano de obra',proc.MO],['Cono',proc.cono],['Pallet',proc.pallet],
     ['Stretch + etiquetas',proc.stretch],['Flete',proc.flete],['Otros varios',proc.otros],['Otros indirectos',proc.indirectos]];
   const rows=comps.map(([comp,usd])=>({comp,usd,ars:usd*tc,pc:usd/tot}));
-  addTitle(ws,'PET Lámina · Costos de procesamiento por kg',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  petTitle(wb,ws,'PET Lámina · Costos de procesamiento por kg',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
   totalRow(ws,5+rows.length,H,{comp:'TOTAL c/flete',usd:proc.totalCFlete,ars:proc.totalCFlete*tc,pc:1});
   totalRow(ws,6+rows.length,H,{comp:'TOTAL s/flete',usd:proc.totalSFlete,ars:proc.totalSFlete*tc});
-  await addLogoToSheet(wb,ws,H.length);
 }
 async function petSheetRecetas(wb){
   const ws=wb.addWorksheet('Recetas');
@@ -1278,8 +1280,7 @@ async function petSheetRecetas(wb){
     .concat([{t:'Suma',k:'sum',w:9,fmt:XF.pct},{t:'MP base USD/kg',k:'mp',w:14,fmt:XF.usd3}]);
   const rows=S.pet.variantes.map(v=>{ const o={nom:v.nom}; let mp=0,sum=0;
     v.r.forEach((x,i)=>{ o['m'+i]=x; sum+=x; mp+=x*(S.pet.insumos[i]?S.pet.insumos[i].usd:0); }); o.sum=sum; o.mp=mp; return o; });
-  addTitle(ws,'PET Lámina · Recetas (composición por variante)',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
-  await addLogoToSheet(wb,ws,H.length);
+  petTitle(wb,ws,'PET Lámina · Recetas (composición por variante)',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
 }
 async function petSheetVariantes(wb){
   const vr=petVariantes(), p=S.pet.params, proc=petProc(), ws=wb.addWorksheet('Costo por Variante');
@@ -1288,8 +1289,7 @@ async function petSheetVariantes(wb){
     {t:'MP ajust.',k:'mpAjust',w:12,fmt:XF.usd3},{t:'Proc. c/flete',k:'proc',w:13,fmt:XF.usd3},
     {t:'Total c/flete',k:'cFlete',w:13,fmt:XF.usd3},{t:'Total s/flete',k:'sFlete',w:13,fmt:XF.usd3},{t:'ARS/kg',k:'arsC',w:13,fmt:XF.ars}];
   const rows=vr.map(v=>({...v,fac:factor,proc:proc.totalCFlete}));
-  addTitle(ws,'PET Lámina · Costo por variante',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
-  await addLogoToSheet(wb,ws,H.length);
+  petTitle(wb,ws,'PET Lámina · Costo por variante',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
 }
 async function petSheetClientes(wb){
   const vr=petVariantes(), ws=wb.addWorksheet('Resumen Clientes');
@@ -1297,12 +1297,11 @@ async function petSheetClientes(wb){
   const H=[{t:'Cliente',k:'cli',w:22},{t:'Variante',k:'variante',w:18},{t:'P. anterior',k:'ant',w:12,fmt:XF.usd2},
     {t:'P. actual',k:'precio',w:12,fmt:XF.usd2},{t:'Aumento',k:'aumento',w:10,fmt:XF.pct},{t:'Costo',k:'costo',w:12,fmt:XF.usd2},
     {t:'M. Bruto',k:'margenBruto',w:10,fmt:XF.pct},{t:'M. Neto USD',k:'netoUSD',w:12,fmt:XF.usd2},{t:'M. Neto %',k:'margenNeto',w:11,fmt:XF.pct,sem:true}];
-  addTitle(ws,'PET Lámina · Resumen de clientes (lista de precios)',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  petTitle(wb,ws,'PET Lámina · Resumen de clientes (lista de precios)',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
   const n=rows.length||1;
   totalRow(ws,5+rows.length,H,{cli:'PROMEDIO',precio:rows.reduce((a,r)=>a+r.precio,0)/n,costo:rows.reduce((a,r)=>a+r.costo,0)/n,
     margenBruto:rows.reduce((a,r)=>a+r.margenBruto,0)/n,netoUSD:rows.reduce((a,r)=>a+r.netoUSD,0)/n,margenNeto:rows.reduce((a,r)=>a+r.margenNeto,0)/n});
   ws.views=[{state:'frozen',ySplit:4}];
-  await addLogoToSheet(wb,ws,H.length);
 }
 async function petSheetNotas(wb){
   const n=S.pet.net, ws=wb.addWorksheet('Notas');
@@ -1315,8 +1314,7 @@ async function petSheetNotas(wb){
     {n:'Semáforo: 🟢 ≥ 30% · 🟡 15–30% · 🔴 < 15% (sobre margen neto).'},
     {n:'Generado automáticamente desde la app de Costos & Precios de Winflex.'}
   ];
-  addTitle(ws,'PET Lámina · Notas',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
-  await addLogoToSheet(wb,ws,H.length);
+  petTitle(wb,ws,'PET Lámina · Notas',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
 }
 
 async function exportPetCostos(){
@@ -1373,7 +1371,7 @@ function petCalcResultHTML(){
   const aportes=c.r.map((x,i)=>({label:cods[i].cod,val:x*(c.mp[i]||0),color:['var(--amber)','#d6a96d','var(--blue)','#9b6dd6','#444','#2c74c4'][i]||'var(--muted)'}));
   const bar=breakdownBar([{label:'MP ajustada',val:r.mpAjust,color:'var(--amber)'},{label:'Procesamiento',val:r.proc,color:'var(--teal)'}]);
   return `
-  <div class="grid g2" style="margin-bottom:14px">
+  <div class="gauto" style="margin-bottom:14px">
     <div class="card stat accent"><div class="card-b stat"><div class="k">Costo unitario ${c.flete?'c/flete':'s/flete'}</div>
       <div class="v">${usd(r.costoU,3)}<small>/kg</small></div><div class="d">${ars(r.arsU)}/kg</div></div></div>
     <div class="card stat"><div class="card-b stat"><div class="k">Total ${nf(c.qty)} kg</div>
@@ -1396,28 +1394,27 @@ function openPetCalc(){
   openModal(`<div class="modal-h"><h3>🧮 Calculadora de costos — PET Lámina</h3><button class="x" onclick="closeModal()">✕</button></div>
    <div class="modal-b">
      <div class="note" style="margin-bottom:12px">Armá una receta y un escenario y mirá el costo al instante. No toca tus datos; podés exportar el cálculo a Excel.</div>
-     <div class="grid g2">
+     <div class="gauto">
        <div class="card"><div class="card-h"><h3>Receta</h3>
          <select id="calcVar" style="margin-left:auto">${S.pet.variantes.map((v,i)=>`<option value="${i}">${v.nom}</option>`).join('')}<option value="-1">Personalizada</option></select></div>
-         <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>MP</th><th>USD/kg</th><th>% mezcla</th></tr></thead><tbody>
+         <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>MP</th><th>USD/kg</th><th>%</th></tr></thead><tbody>
            ${cods.map((m,i)=>`<tr><td style="text-align:left"><span class="chip">${m.cod}</span> <span class="note">${m.desc}</span></td>
-             <td>${nInp('','',{w:74}).replace('data-path=""','id="calc_mp_'+i+'"').replace('value=""','value="'+m.usd+'"')}</td>
-             <td>${nInp('','',{w:64}).replace('data-path=""','id="calc_pct_'+i+'"').replace('value=""','value="'+(S.pet.variantes[0].r[i]*100)+'"')}</td></tr>`).join('')}
+             <td>${nInp('','',{w:66}).replace('data-path=""','id="calc_mp_'+i+'"').replace('value=""','value="'+m.usd+'"')}</td>
+             <td>${nInp('','',{w:54}).replace('data-path=""','id="calc_pct_'+i+'"').replace('value=""','value="'+(S.pet.variantes[0].r[i]*100)+'"')}</td></tr>`).join('')}
          </tbody></table></div></div></div>
        <div class="card"><div class="card-h"><h3>Escenario</h3></div>
-         <div class="card-b"><div class="params-grid">
+         <div class="card-b"><div style="display:grid;gap:10px">
            <div class="field"><label>Tipo de cambio<small>ARS/USD</small></label><div class="iw"><input type="number" id="calc_tc" value="${petCalc.tc}"></div></div>
            <div class="field"><label>Merma neta<small>%</small></label><div class="iw"><input type="number" id="calc_merma" value="${(petCalc.merma*100).toFixed(1)}"></div></div>
            <div class="field"><label>Procesamiento<small>USD/kg</small></label><div class="iw"><input type="number" step="any" id="calc_proc" value="${petCalc.proc.toFixed(4)}"></div></div>
            <div class="field"><label>Cantidad<small>kg</small></label><div class="iw"><input type="number" id="calc_qty" value="${petCalc.qty}"></div></div>
-         </div>
-         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);margin-top:6px">
-           <input type="checkbox" id="calc_flete" checked> Incluir flete (al destildar usa procesamiento s/flete)</label>
-         </div></div>
+           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2)">
+             <input type="checkbox" id="calc_flete" checked> Incluir flete (al destildar usa procesamiento s/flete)</label>
+         </div></div></div>
      </div>
      <div id="calcResult" style="margin-top:14px">${petCalcResultHTML()}</div>
    </div>
-   <div class="modal-foot"><button class="btn" id="calcExport">⬇ Exportar cálculo (Excel)</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
+   <div class="modal-foot"><button class="btn" id="calcExport">⬇ Exportar cálculo (Excel)</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`,true);
 
   function readAndRender(){
     for(let i=0;i<6;i++){ petCalc.mp[i]=num($('#calc_mp_'+i).value); petCalc.r[i]=num($('#calc_pct_'+i).value)/100; }
@@ -1440,7 +1437,7 @@ function openPetCalc(){
 async function exportPetCalc(){
   const c=petCalc, r=petCalcCompute(), cods=S.pet.insumos.slice(0,6), wb=new ExcelJS.Workbook(), ws=wb.addWorksheet('Cálculo');
   const H=[{t:'Concepto',k:'k',w:34},{t:'Valor',k:'v',w:16},{t:'Detalle',k:'d',w:30}];
-  addTitle(ws,'PET Lámina · Cálculo de costo',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H);
+  petTitle(wb,ws,'PET Lámina · Cálculo de costo',H.length); setCols(ws,H); headerRow(ws,4,H);
   const rows=[];
   cods.forEach((m,i)=>{ if(c.r[i]>0) rows.push({k:m.cod+' · '+m.desc, v:c.mp[i], d:pct(c.r[i],0)+' · aporte '+usd(c.r[i]*c.mp[i],3)}); });
   rows.push({k:'MP base',v:r.mpBase,d:'USD/kg'});
@@ -1452,7 +1449,6 @@ async function exportPetCalc(){
   rows.push({k:'Cantidad',v:c.qty,d:'kg'});
   rows.push({k:'TOTAL',v:r.totalUSD,d:'USD · '+ars(r.totalARS)});
   dataRows(ws,5,H,rows);
-  await addLogoToSheet(wb,ws,H.length);
   await download(wb,'Winflex_PET_calculo.xlsx');
 }
 
@@ -1836,8 +1832,8 @@ function renderBandejas(){
 /* ============================================================
    MODAL + SIMULADORES
    ============================================================ */
-function openModal(html){ $('#modal').innerHTML=html; $('#modalBg').classList.add('open'); }
-function closeModal(){ $('#modalBg').classList.remove('open'); }
+function openModal(html,wide){ const m=$('#modal'); m.innerHTML=html; m.classList.toggle('wide',!!wide); m.scrollTop=0; $('#modalBg').classList.add('open'); }
+function closeModal(){ $('#modalBg').classList.remove('open'); $('#modal').classList.remove('wide'); }
 $('#modalBg').addEventListener('click',e=>{ if(e.target.id==='modalBg') closeModal(); });
 
 const MODS={
@@ -2041,13 +2037,27 @@ function openSettings(){
    EXPORT EXCEL (ExcelJS · formato ejecutivo)
    ============================================================ */
 const XF={ usd2:'"US$"#,##0.00', usd3:'"US$"#,##0.000', usd4:'"US$"#,##0.0000', ars:'"$"#,##0', pct:'0.0%', int:'#,##0' };
-const CLR={ teal:'FF0B6B63', tealD:'FF084F49', tealL:'FFE6F1F0', amber:'FFC8761A', amberL:'FFFBF0E2',
-  green:'FFE7F6EE', greenT:'FF1F9D57', yellow:'FFFCF4DD', yellowT:'FFB07D06', red:'FFFBE9E9', redT:'FFD64545',
-  ink:'FF15201F', muted:'FF7E8A85', line:'FFDDE3E6', white:'FFFFFFFF', zebra:'FFF4F8F7' };
+const CLR={ teal:'FF1A472A', tealD:'FF2E9E5B', tealL:'FFEAF5EE', amber:'FFC8761A', amberL:'FFFBF0E2',
+  green:'FFE7F6EE', greenT:'FF1F8F4E', yellow:'FFFCF4DD', yellowT:'FFB07D06', red:'FFFBE9E9', redT:'FFD64545',
+  ink:'FF15201F', muted:'FF7E8A85', line:'FFDDE3E6', white:'FFFFFFFF', zebra:'FFF3FAF5' };
 
 function fill(c){ return {type:'pattern',pattern:'solid',fgColor:{argb:c}}; }
 function thinBorder(){ const s={style:'thin',color:{argb:CLR.line}}; return {top:s,left:s,bottom:s,right:s}; }
 
+/* Encabezado PET: logo limpio sobre blanco (fila 1) + barra verde Winflex (fila 2) + subtítulo (fila 3) */
+function petTitle(wb,ws,title,ncols){
+  ws.getRow(1).height=40;
+  for(let i=1;i<=ncols;i++){ const c=ws.getCell(1,i); c.fill=fill(CLR.white);
+    c.border={bottom:{style:'thin',color:{argb:CLR.tealL}}}; }
+  ws.mergeCells(2,1,2,ncols);
+  const t=ws.getCell(2,1); t.value='WINFLEX  ·  '+title; t.font={name:'Arial',bold:true,size:13,color:{argb:CLR.white}};
+  t.fill=fill(CLR.teal); t.alignment={vertical:'middle',horizontal:'left',indent:1}; ws.getRow(2).height=26;
+  ws.mergeCells(3,1,3,ncols);
+  const s=ws.getCell(3,1); s.value=stamp(); s.font={name:'Arial',size:9,italic:true,color:{argb:CLR.muted}};
+  s.fill=fill(CLR.tealL); s.alignment={horizontal:'left',indent:1}; ws.getRow(3).height=16;
+  try{ const url=winflexLogoDataURL(); if(url){ const b64=url.split(',')[1]; const ext=/image\/jpe?g/.test(url)?'jpeg':'png';
+    const id=wb.addImage({base64:b64,extension:ext}); ws.addImage(id,{tl:{col:0.22,row:0.18},ext:{width:104,height:30}}); } }catch(e){}
+}
 function addTitle(ws,title,sub,ncols){
   ws.mergeCells(1,1,1,ncols);
   const t=ws.getCell(1,1); t.value='WINFLEX · '+title; t.font={name:'Arial',bold:true,size:16,color:{argb:CLR.white}};
@@ -2098,7 +2108,7 @@ async function exportPET(){
   const H=[{t:'Cliente',k:'cli',w:22},{t:'Variante',k:'variante',w:18},{t:'P. anterior',k:'ant',w:12,fmt:XF.usd2},
     {t:'P. actual',k:'precio',w:12,fmt:XF.usd2},{t:'Aumento',k:'aumento',w:10,fmt:XF.pct},{t:'Costo',k:'costo',w:12,fmt:XF.usd2},
     {t:'M. Bruto',k:'margenBruto',w:10,fmt:XF.pct},{t:'M. Neto USD',k:'netoUSD',w:12,fmt:XF.usd2},{t:'M. Neto %',k:'margenNeto',w:11,fmt:XF.pct,sem:true}];
-  addTitle(ws,'PET Lámina · Lista de precios',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  petTitle(wb,ws,'PET Lámina · Lista de precios',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
   const n=rows.length;
   totalRow(ws,5+n,H,{cli:'PROMEDIO',ant:rows.reduce((a,r)=>a+r.ant,0)/n,precio:rows.reduce((a,r)=>a+r.precio,0)/n,
     costo:rows.reduce((a,r)=>a+r.costo,0)/n,margenBruto:rows.reduce((a,r)=>a+r.margenBruto,0)/n,

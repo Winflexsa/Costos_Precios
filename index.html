@@ -225,6 +225,19 @@ td .formula{display:block;margin-top:3px;white-space:normal}
 .exp-grid .ei .ef{display:block;font-family:'IBM Plex Mono';font-size:10px;color:var(--muted);margin-top:1px}
 .lnk{cursor:pointer;color:var(--teal);font-weight:600;font-size:11.5px;white-space:nowrap}
 .lnk:hover{text-decoration:underline}
+/* fila de variante clickeable + build-up por variante */
+.clickrow td{transition:background .12s}
+.clickrow:hover td{background:var(--teal-l)}
+.accent-num{color:var(--teal)}
+.buildup .bu{display:flex;justify-content:space-between;align-items:center;padding:6px 2px;border-bottom:1px dashed var(--line);font-size:12.5px;color:var(--ink2)}
+.buildup .bu b{font-family:'IBM Plex Mono';color:var(--ink)}
+.buildup .bu.op{color:var(--muted)}
+.buildup .bu.sum b{color:var(--teal)}
+.buildup .bu.grand{border-bottom:none;font-weight:600;font-size:14px;color:var(--ink)}
+.buildup .bu.grand b{color:var(--teal)}
+/* barra de filtros */
+.filterbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto}
+.filterbar .search{margin-left:0}
 </style>
 </head>
 <body>
@@ -794,14 +807,48 @@ function anatomyCard(title,parts,totalLabel,{tag='',unit='/kg',dec=4}={}){
 /* ============================================================
    MÓDULO PET LÁMINA
    ============================================================ */
-let petSearch='';
+let petSearch='', petFilter={mat:'',col:''}, petVarExp=new Set(), petReportDim='cli';
+function petMaterial(nom){ return /virgen/i.test(nom)?'PET Virgen':'rPET'; }
+function petColor(nom){ return nom.replace(/rPET\s*/i,'').replace(/PET\s*Virgen\s*/i,'').replace(/PET\s*/i,'').trim()||'Cristal'; }
+
+/* detalle desplegable de una variante (receta + build-up del costo) */
+function petVarDetail(vi,v,proc,p,factor,tc){
+  const vv=S.pet.variantes[vi];
+  const recetaRows=vv.r.map((x,j)=>{ if(x<=0) return ''; const ins=S.pet.insumos[j]||{};
+    return `<tr><td style="text-align:left"><span class="chip">${ins.cod}</span> ${ins.desc}</td>
+      <td class="num">${pct(x,0)}</td><td class="num">${usd(ins.usd||0,2)}</td><td class="num">${usd(x*(ins.usd||0),3)}</td></tr>`;}).filter(Boolean).join('');
+  const procMini=[['Energía',proc.energia],['Mano de obra',proc.MO],['Cono',proc.cono],['Pallet',proc.pallet],
+    ['Stretch+etiq.',proc.stretch],['Flete',proc.flete],['Otros+indir.',proc.otros+proc.indirectos]]
+    .map(([l,val])=>`<div class="ei">${l}<b>${usd(val,4)}</b></div>`).join('');
+  return `<tr class="exp-row"><td colspan="9"><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+    <div>
+      <div class="params-sub" style="margin-bottom:6px">Receta — composición de materia prima</div>
+      <div class="tbl-wrap"><table><thead><tr><th>Insumo</th><th>%</th><th>USD/kg</th><th>Aporte</th></tr></thead><tbody>${recetaRows}
+        <tr class="total"><td style="text-align:left">MP base</td><td></td><td></td><td class="num">${usd(v.mpBase,3)}</td></tr></tbody></table></div>
+    </div>
+    <div>
+      <div class="params-sub" style="margin-bottom:6px">Cómo se arma el costo</div>
+      <div class="buildup">
+        <div class="bu"><span>MP base</span><b>${usd(v.mpBase,3)}</b></div>
+        <div class="bu op"><span>× factor merma neta · 1 ÷ (1 − ${pct(p.merma-p.recuperacion,0)})</span><b>× ${factor.toFixed(3)}</b></div>
+        <div class="bu sum"><span>MP ajustada</span><b>${usd(v.mpAjust,3)}</b></div>
+        <div class="bu op"><span>+ Procesamiento c/flete</span><b>${usd(proc.totalCFlete,3)}</b></div>
+        <div class="exp-grid" style="margin:4px 0 8px">${procMini}</div>
+        <div class="bu grand"><span>= Total c/flete</span><b>${usd(v.cFlete,3)} · ${ars(v.arsC)}</b></div>
+        <div class="bu"><span>− Flete (cliente retira)</span><b>${usd(v.sFlete,3)}</b></div>
+      </div>
+    </div>
+  </div></td></tr>`;
+}
+
 function renderPET(){
   const vr=petVariantes();
   const proc=petProc(), p=S.pet.params, n=S.pet.net, tc=TC();
   const rows=S.pet.clientes.map((c,i)=>({...petClientRow(c,vr),i}));
   const sub=subTab.pet;
+  S.pet.listHistory=S.pet.listHistory||[];
 
-  const head=`<div class="section-head"><div><h2>PET Lámina</h2><div class="sub">7 variantes rPET/PET virgen · ${rows.length} clientes</div></div>
+  const head=`<div class="section-head"><div><h2>PET Lámina</h2><div class="sub">${S.pet.variantes.length} variantes rPET/PET virgen · ${rows.length} clientes</div></div>
     <div class="sh-spacer"></div>
     <button class="btn" id="petSim">📊 Simulador</button>
     <button class="btn" id="petExport">⬇ Excel</button>
@@ -810,6 +857,30 @@ function renderPET(){
 
   let body;
   if(sub==='costos'){
+    const factor=1/(1-(p.merma-p.recuperacion));
+    const cheap=vr.reduce((m,v)=>v.cFlete<m.cFlete?v:m,vr[0]), dear=vr.reduce((m,v)=>v.cFlete>m.cFlete?v:m,vr[0]);
+
+    const hero=`<div class="card" style="margin-bottom:16px">
+      <div class="card-h"><h3>Costo final por variante</h3><span class="tag">tocá una variante para ver el detalle · merma neta ${pct(p.merma-p.recuperacion,0)} · TC ${ars(tc)}</span></div>
+      <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+        <th>Variante</th><th>Color</th><th>MP base</th><th>MP ajust.</th><th>+ Proc. c/flete</th><th>Total c/flete</th><th>Total s/flete</th><th>ARS/kg</th><th></th></tr></thead><tbody>
+        ${vr.map((v,vi)=>{ const open=petVarExp.has(vi);
+          return `<tr class="clickrow" data-vrow="${vi}" style="cursor:pointer">
+            <td style="text-align:left"><b>${v.nom}</b></td>
+            <td style="text-align:left"><span class="chip">${petColor(v.nom)}</span></td>
+            <td class="num">${usd(v.mpBase,3)}</td>
+            <td class="num">${usd(v.mpAjust,3)}</td>
+            <td class="num">${usd(proc.totalCFlete,3)}</td>
+            <td class="num accent-num"><b>${usd(v.cFlete,3)}</b></td>
+            <td class="num">${usd(v.sFlete,3)}</td>
+            <td class="num">${ars(v.arsC)}</td>
+            <td class="num"><span class="lnk">${open?'▲':'▼'}</span></td></tr>
+          ${open?petVarDetail(vi,v,proc,p,factor,tc):''}`;}).join('')}
+        <tr class="total"><td style="text-align:left">RANGO</td><td></td><td></td><td></td><td></td>
+          <td class="num">${usd(cheap.cFlete,3)} → ${usd(dear.cFlete,3)}</td><td></td><td></td><td></td></tr>
+      </tbody></table></div>
+      <div class="note" style="margin-top:8px">Más barata: <b>${cheap.nom}</b> (${usd(cheap.cFlete,3)}/kg) · Más cara: <b>${dear.nom}</b> (${usd(dear.cFlete,3)}/kg). El procesamiento c/flete es común a todas; lo que cambia es la materia prima de cada receta.</div></div></div>`;
+
     const parts=[
       {label:'Energía',formula:'directo de parámetros',usd:proc.energia,color:'var(--blue)'},
       {label:'Mano de obra',formula:`$${nf(p.valorHora)} × ${p.operarios} op × ${p.cargas} cargas ÷ ${p.prodHora} kg/h ÷ TC`,usd:proc.MO,color:'var(--teal)'},
@@ -820,7 +891,6 @@ function renderPET(){
       {label:'Otros varios',formula:'directo de parámetros',usd:proc.otros,color:'var(--muted)'},
       {label:'Otros indirectos',formula:'directo de parámetros',usd:proc.indirectos,color:'#b8c0bc'}
     ];
-    const factor=1/(1-(p.merma-p.recuperacion));
     const matrix=`<div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>Recetas · composición por variante</h3><span class="tag">% de cada MP · debe sumar 100%</span></div>
       <div class="card-b"><div class="tbl-wrap"><table class="matrix"><thead><tr><th>Variante</th>
@@ -835,26 +905,11 @@ function renderPET(){
       <div class="note" style="margin-top:8px">Cada celda es el % del insumo en la mezcla. MP01-MP06 = preforma molida, scrap, virgen, master blanco, negro, azulino. La columna MP base es el costo de materia prima antes de ajustar por merma.</div></div></div>`;
 
     body=`
-    <div class="grid g4" style="margin-bottom:16px">
-      <div class="card stat accent"><div class="k">Costo proceso c/flete</div><div class="v">${usd(proc.totalCFlete,3)}<small>/kg</small></div><div class="d">${ars(proc.totalCFlete*tc)}/kg</div></div>
-      <div class="card stat"><div class="k">Costo proceso s/flete</div><div class="v">${usd(proc.totalSFlete,3)}<small>/kg</small></div><div class="d">cliente retira</div></div>
-      <div class="card stat"><div class="k">Variante más barata</div><div class="v" style="font-size:20px">${usd(Math.min.apply(null,vr.map(v=>v.cFlete)),2)}</div><div class="d">${vr.reduce((m,v)=>v.cFlete<m.cFlete?v:m,vr[0]).nom}</div></div>
-      <div class="card stat"><div class="k">Variante más cara</div><div class="v" style="font-size:20px">${usd(Math.max.apply(null,vr.map(v=>v.cFlete)),2)}</div><div class="d">${vr.reduce((m,v)=>v.cFlete>m.cFlete?v:m,vr[0]).nom}</div></div>
-    </div>
+    ${hero}
 
-    <div style="margin-bottom:16px">${anatomyCard('Anatomía del costo de procesamiento',parts,'Total procesamiento c/flete',{tag:`merma neta ${pct(p.merma-p.recuperacion,0)} · TC ${ars(tc)}`,dec:4})}</div>
+    <div style="margin-bottom:16px">${anatomyCard('Anatomía del costo de procesamiento (común a todas las variantes)',parts,'Total procesamiento c/flete',{tag:`merma neta ${pct(p.merma-p.recuperacion,0)} · TC ${ars(tc)}`,dec:4})}</div>
 
     ${matrix}
-
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-h"><h3>Costo final por variante</h3><span class="tag">MP ajustada + procesamiento</span></div>
-      <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th>Variante</th><th>MP base</th><th>× merma</th><th>MP ajust.</th><th>+ Proc. c/flete</th><th>Total c/flete</th><th>Total s/flete</th><th>ARS/kg</th></tr></thead><tbody>
-        ${vr.map(v=>`<tr><td style="text-align:left">${v.nom}</td><td class="num">${usd(v.mpBase,3)}</td>
-          <td class="num">×${factor.toFixed(3)}</td><td class="num">${usd(v.mpAjust,3)}</td>
-          <td class="num">${usd(proc.totalCFlete,3)}</td><td class="num"><b>${usd(v.cFlete,3)}</b></td>
-          <td class="num">${usd(v.sFlete,3)}</td><td class="num">${ars(v.arsC)}</td></tr>`).join('')}
-      </tbody></table></div></div></div>
 
     <div class="grid g2" style="margin-bottom:16px">
       <div class="card">
@@ -888,25 +943,44 @@ function renderPET(){
         </div></div></div>
     </div>`;
   } else {
-    const filt=rows.filter(r=>!petSearch||r.cli.toLowerCase().includes(petSearch.toLowerCase()));
-    const avgNeto=rows.reduce((a,r)=>a+r.margenNeto,0)/(rows.length||1);
-    const avgBruto=rows.reduce((a,r)=>a+r.margenBruto,0)/(rows.length||1);
     const opts=S.pet.variantes.map((v,i)=>({v:i,t:v.nom}));
+    const mats=['rPET','PET Virgen'];
+    const cols=Array.from(new Set(S.pet.variantes.map(v=>petColor(v.nom))));
+    const filt=rows.filter(r=>{
+      if(petSearch && !r.cli.toLowerCase().includes(petSearch.toLowerCase())) return false;
+      if(petFilter.mat && petMaterial(r.variante)!==petFilter.mat) return false;
+      if(petFilter.col && petColor(r.variante)!==petFilter.col) return false;
+      return true;
+    });
+    const base=filt.length?filt:rows;
+    const avgNeto=base.reduce((a,r)=>a+r.margenNeto,0)/(base.length||1);
+    const avgBruto=base.reduce((a,r)=>a+r.margenBruto,0)/(base.length||1);
+    const avgPrecio=base.reduce((a,r)=>a+r.precio,0)/(base.length||1);
+    const avgCosto=base.reduce((a,r)=>a+r.costo,0)/(base.length||1);
+    const filtered=(petSearch||petFilter.mat||petFilter.col);
     body=`
     <div class="grid g4" style="margin-bottom:16px">
-      <div class="card stat accent"><div class="k">Margen neto prom.</div><div class="v">${pct(avgNeto,1)}</div><div class="d">después de gastos + Ganancias</div></div>
+      <div class="card stat accent"><div class="k">Margen neto prom.${filtered?' (filtro)':''}</div><div class="v">${pct(avgNeto,1)}</div><div class="d">después de gastos + Ganancias</div></div>
       <div class="card stat"><div class="k">Margen bruto prom.</div><div class="v">${pct(avgBruto,1)}</div><div class="d">precio − costo</div></div>
-      <div class="card stat"><div class="k">Precio prom.</div><div class="v">${usd(rows.reduce((a,r)=>a+r.precio,0)/(rows.length||1),2)}<small>/kg</small></div><div class="d">lista vigente</div></div>
-      <div class="card stat"><div class="k">Costo prom.</div><div class="v">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}<small>/kg</small></div><div class="d">según variante</div></div>
+      <div class="card stat"><div class="k">Precio prom.</div><div class="v">${usd(avgPrecio,2)}<small>/kg</small></div><div class="d">${filtered?filt.length+' de '+rows.length+' clientes':'lista vigente'}</div></div>
+      <div class="card stat"><div class="k">Costo prom.</div><div class="v">${usd(avgCosto,2)}<small>/kg</small></div><div class="d">según variante</div></div>
     </div>
 
     <div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>Lista de precios por cliente</h3>
-        <input class="search" id="petSearchI" placeholder="Buscar cliente…" value="${petSearch}" style="margin-left:auto">
-        <button class="btn sm primary" id="petAdd" style="margin-left:8px">+ Cliente</button></div>
+        <div class="filterbar">
+          <input class="search" id="petSearchI" placeholder="Buscar cliente…" value="${petSearch}">
+          <select id="petFMat"><option value="">Material: todos</option>${mats.map(m=>`<option ${petFilter.mat===m?'selected':''}>${m}</option>`).join('')}</select>
+          <select id="petFCol"><option value="">Color: todos</option>${cols.map(c=>`<option ${petFilter.col===c?'selected':''}>${c}</option>`).join('')}</select>
+          ${filtered?`<button class="btn sm" id="petFClear">Limpiar</button>`:''}
+          <button class="btn sm" id="petReport">📋 Informe</button>
+          <button class="btn sm" id="petSaveList">💾 Guardar lista</button>
+          <button class="btn sm" id="petHistList">🕘 Historial</button>
+          <button class="btn sm primary" id="petAdd">+ Cliente</button>
+        </div></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
         <th>Cliente</th><th>Variante</th><th>P. ant.</th><th>P. act.</th><th>Aum.</th><th>Costo</th><th>M.Bruto</th><th>M.Neto USD</th><th>M.Neto%</th><th>Estado</th><th></th></tr></thead><tbody>
-        ${filt.map(r=>{ const s=semaforo(r.margenNeto); const ar=r.aumento;
+        ${filt.length?filt.map(r=>{ const s=semaforo(r.margenNeto); const ar=r.aumento;
           return `<tr>
           <td><input class="tinp" style="max-width:130px;text-align:left;font-family:'IBM Plex Sans'" data-path="pet.clientes.${r.i}.cli" value="${r.cli}"></td>
           <td><select class="tsel" data-path="pet.clientes.${r.i}.v">${opts.map(o=>`<option value="${o.v}" ${o.v==r.v?'selected':''}>${o.t}</option>`).join('')}</select></td>
@@ -918,10 +992,11 @@ function renderPET(){
           <td class="num">${usd(r.netoUSD,2)}</td>
           <td class="num"><b>${pct(r.margenNeto,1)}</b></td>
           <td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td>
-          <td class="row-actions"><button class="mini-x" data-del-pet="${r.i}">✕</button></td></tr>`;}).join('')}
+          <td class="row-actions"><button class="mini-x" data-del-pet="${r.i}">✕</button></td></tr>`;}).join('')
+          :`<tr><td colspan="11" class="empty" style="padding:20px">Ningún cliente coincide con el filtro.</td></tr>`}
       </tbody>
-      <tr class="total"><td>PROMEDIO</td><td></td><td></td><td class="num">${usd(rows.reduce((a,r)=>a+r.act,0)/(rows.length||1),2)}</td><td></td>
-        <td class="num">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}</td><td class="num">${pct(avgBruto,1)}</td><td></td><td class="num">${pct(avgNeto,1)}</td><td></td><td></td></tr>
+      <tr class="total"><td>PROMEDIO${filtered?' (filtro)':''}</td><td></td><td></td><td class="num">${usd(avgPrecio,2)}</td><td></td>
+        <td class="num">${usd(avgCosto,2)}</td><td class="num">${pct(avgBruto,1)}</td><td></td><td class="num">${pct(avgNeto,1)}</td><td></td><td></td></tr>
       </table></div></div></div>
 
     <div class="card">
@@ -939,11 +1014,105 @@ function renderPET(){
   wireSub('pet',renderPET);
   $('#petExport').onclick=exportPET;
   $('#petSim').onclick=openPetSim;
-  if(sub==='precios'){
-    $('#petSearchI').onchange=e=>{petSearch=e.target.value;renderPET();};
+  if(sub==='costos'){
+    $$('#page-pet [data-vrow]').forEach(r=>r.onclick=()=>{ const i=+r.dataset.vrow; petVarExp.has(i)?petVarExp.delete(i):petVarExp.add(i); renderPET(); });
+  } else {
+    $('#petSearchI').onchange=e=>{ petSearch=e.target.value; renderPET(); };
+    $('#petFMat').onchange=e=>{ petFilter.mat=e.target.value; renderPET(); };
+    $('#petFCol').onchange=e=>{ petFilter.col=e.target.value; renderPET(); };
+    if($('#petFClear')) $('#petFClear').onclick=()=>{ petSearch=''; petFilter={mat:'',col:''}; renderPET(); };
+    $('#petReport').onclick=openPetReport;
+    $('#petSaveList').onclick=petListSave;
+    $('#petHistList').onclick=openPetListHistory;
     $('#petAdd').onclick=()=>{ S.pet.clientes.push({cli:'Nuevo cliente',v:0,ant:0,act:0}); commit(); renderPET(); };
     $$('#page-pet [data-del-pet]').forEach(b=>b.onclick=()=>{ S.pet.clientes.splice(+b.dataset.delPet,1); commit(); renderPET(); });
   }
+}
+
+/* ---- Informe PET por dimensión ---- */
+function petReportGroups(dim){
+  const vr=petVariantes();
+  const rows=S.pet.clientes.map(c=>petClientRow(c,vr));
+  const keyOf=r=> dim==='cli'?r.cli : dim==='mat'?petMaterial(r.variante) : dim==='col'?petColor(r.variante) : r.variante;
+  const map={};
+  rows.forEach(r=>{ const k=keyOf(r); (map[k]=map[k]||[]).push(r); });
+  return Object.keys(map).map(k=>{ const arr=map[k];
+    return { grupo:k, n:arr.length,
+      precio:arr.reduce((a,r)=>a+r.precio,0)/arr.length,
+      costo:arr.reduce((a,r)=>a+r.costo,0)/arr.length,
+      neto:arr.reduce((a,r)=>a+r.margenNeto,0)/arr.length,
+      peor:Math.min.apply(null,arr.map(r=>r.margenNeto)) }; }).sort((a,b)=>b.n-a.n);
+}
+function openPetReport(){
+  const dims=[['cli','Cliente'],['mat','Material'],['col','Color'],['var','Variante']];
+  const lab=dims.find(d=>d[0]===petReportDim)[1];
+  const g=petReportGroups(petReportDim);
+  openModal(`<div class="modal-h"><h3>📋 Informe PET — por ${lab.toLowerCase()}</h3><button class="x" onclick="closeModal()">✕</button></div>
+   <div class="modal-b">
+     <div class="filterbar" style="margin:0 0 14px">
+       ${dims.map(d=>`<button class="btn sm ${petReportDim===d[0]?'primary':''}" data-rdim="${d[0]}">${d[1]}</button>`).join('')}
+     </div>
+     <div class="tbl-wrap"><table><thead><tr><th>${lab}</th><th>Ítems</th><th>Precio prom.</th><th>Costo prom.</th><th>Margen neto prom.</th><th>Peor margen</th></tr></thead><tbody>
+       ${g.map(x=>{ const s=semaforo(x.neto);
+         return `<tr><td style="text-align:left">${x.grupo}</td><td class="num">${x.n}</td><td class="num">${usd(x.precio,2)}</td>
+         <td class="num">${usd(x.costo,2)}</td><td class="num"><span class="pill ${s}">${pct(x.neto,1)}</span></td><td class="num">${pct(x.peor,1)}</td></tr>`;}).join('')}
+     </tbody></table></div>
+   </div>
+   <div class="modal-foot"><button class="btn" id="petRepExport">⬇ Exportar este informe</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
+  $$('#modal [data-rdim]').forEach(b=>b.onclick=()=>{ petReportDim=b.dataset.rdim; openPetReport(); });
+  $('#petRepExport').onclick=()=>exportPetReport(petReportDim,g);
+}
+async function exportPetReport(dim,groups){
+  const labels={cli:'Cliente',mat:'Material',col:'Color',var:'Variante'};
+  const wb=new ExcelJS.Workbook(); const ws=wb.addWorksheet('Informe '+labels[dim]);
+  const H=[{t:labels[dim],k:'grupo',w:26},{t:'Ítems',k:'n',w:9,fmt:XF.int},{t:'Precio prom.',k:'precio',w:13,fmt:XF.usd2},
+    {t:'Costo prom.',k:'costo',w:13,fmt:XF.usd2},{t:'Margen neto prom.',k:'neto',w:16,fmt:XF.pct,sem:true},{t:'Peor margen',k:'peor',w:12,fmt:XF.pct}];
+  groups.forEach(x=>{ x.__sg=0.30; x.__sa=0.15; });
+  addTitle(ws,'PET Lámina · Informe por '+labels[dim],stamp(),H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,groups);
+  ws.views=[{state:'frozen',ySplit:4}];
+  await download(wb,'Winflex_PET_informe_'+dim+'.xlsx');
+}
+
+/* ---- Guardado e historial de la lista de precios PET ---- */
+function petListSave(){
+  openModal(`<div class="modal-h"><h3>💾 Guardar lista de precios PET</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b"><div class="note" style="margin-bottom:12px">Guarda una foto de la lista PET actual (cliente, variante y precio) más el TC. La lista vigente sigue siendo la “actual”; las guardadas quedan en el historial para consultar o restaurar.</div>
+      <div class="field"><label>Etiqueta de la versión</label><div class="iw"><input id="petSnapLabel" type="text" placeholder="Ej: Lista junio 2026 post-aumento" style="font-family:'IBM Plex Sans'"></div></div></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button><button class="btn primary" id="petSnapSave">Guardar versión</button></div>`);
+  $('#petSnapLabel').focus();
+  $('#petSnapSave').onclick=()=>{
+    const vr=petVariantes(); const rr=S.pet.clientes.map(c=>petClientRow(c,vr));
+    S.pet.listHistory=S.pet.listHistory||[];
+    S.pet.listHistory.unshift({ id:Date.now(), date:nowISO(),
+      label:$('#petSnapLabel').value.trim()||('Lista '+new Date().toLocaleDateString('es-AR')),
+      tc:TC(), rows:S.pet.clientes.map(c=>({cli:c.cli,v:c.v,act:c.act})),
+      avgPrecio:rr.reduce((a,r)=>a+r.precio,0)/(rr.length||1),
+      avgNeto:rr.reduce((a,r)=>a+r.margenNeto,0)/(rr.length||1) });
+    if(S.pet.listHistory.length>50) S.pet.listHistory.length=50;
+    commit(); closeModal(); toast('Lista guardada','ok');
+  };
+}
+function openPetListHistory(){
+  S.pet.listHistory=S.pet.listHistory||[];
+  const vr=petVariantes(); const rr=S.pet.clientes.map(c=>petClientRow(c,vr));
+  const curP=rr.reduce((a,r)=>a+r.precio,0)/(rr.length||1), curN=rr.reduce((a,r)=>a+r.margenNeto,0)/(rr.length||1);
+  openModal(`<div class="modal-h"><h3>🕘 Historial de listas PET</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b"><div class="tbl-wrap"><table><thead><tr><th>Versión</th><th>Fecha</th><th>TC</th><th>Precio prom.</th><th>M.Neto prom.</th><th></th></tr></thead><tbody>
+      <tr style="background:var(--teal-l)"><td style="text-align:left"><b>● Actual (en edición)</b></td><td>—</td><td class="num">${ars(TC())}</td><td class="num">${usd(curP,2)}</td><td class="num">${pct(curN,1)}</td><td></td></tr>
+      ${S.pet.listHistory.length?S.pet.listHistory.map(h=>`<tr>
+        <td style="text-align:left;white-space:normal"><b>${h.label}</b></td>
+        <td>${new Date(h.date).toLocaleDateString('es-AR')}</td>
+        <td class="num">${ars(h.tc)}</td><td class="num">${usd(h.avgPrecio,2)}</td><td class="num">${pct(h.avgNeto,1)}</td>
+        <td class="row-actions"><button class="btn sm" data-prest="${h.id}">Restaurar</button><button class="mini-x" data-pdel="${h.id}">✕</button></td></tr>`).join('')
+        :`<tr><td colspan="6" class="empty" style="padding:18px">Todavía no guardaste ninguna versión. Usá “💾 Guardar lista”.</td></tr>`}
+    </tbody></table></div>
+    <div class="note" style="margin-top:10px">Restaurar reescribe precios y variantes actuales con los de esa versión (por orden de fila). Conviene guardar la lista vigente antes.</div></div>
+    <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`);
+  $$('#modal [data-prest]').forEach(b=>b.onclick=()=>{ const h=S.pet.listHistory.find(x=>x.id==b.dataset.prest); if(!h)return;
+    if(!confirm(`¿Restaurar “${h.label}”? Se sobrescriben los precios PET actuales.`)) return;
+    h.rows.forEach((row,i)=>{ if(S.pet.clientes[i]){ S.pet.clientes[i].act=row.act; S.pet.clientes[i].v=row.v; } });
+    commit(); closeModal(); renderPET(); toast('Lista restaurada','ok'); });
+  $$('#modal [data-pdel]').forEach(b=>b.onclick=()=>{ S.pet.listHistory=S.pet.listHistory.filter(x=>x.id!=b.dataset.pdel); commit(); openPetListHistory(); });
 }
 
 /* ============================================================

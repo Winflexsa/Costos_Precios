@@ -1547,79 +1547,66 @@ function renderPETPE(){
 
   const head=`<div class="section-head"><div><h2>Laminado PET/PE</h2><div class="sub">Lámina rPET + film PE laminados y refilados · ${rows.length} productos</div></div>
     <div class="sh-spacer"></div>
-    <button class="btn" id="ppSim">📊 Simulador</button>
+    <button class="btn" id="ppCalc">🧮 Calculadora</button>
+    <button class="btn" id="ppSave">💾 Guardar costo</button>
+    <button class="btn" id="ppHist">🕘 Historial</button>
     <button class="btn" id="ppExport">⬇ Excel</button>
   </div>
   ${subnav('petpe',[{id:'costos',label:'🧮 Costos'},{id:'precios',label:'🏷️ Precios'}])}`;
 
   let body;
   if(sub==='costos'){
-    const procParts=[
-      {label:'Adhesivos',val:proc.adhes,color:'var(--amber)'},
-      {label:'MO laminado',val:proc.MOlam,color:'var(--teal)'},
-      {label:'Energía lam.',val:proc.enerLam,color:'var(--blue)'},
-      {label:'MO refilado',val:proc.MOref,color:'var(--teal-d)'},
-      {label:'Energía ref.',val:proc.enerRef,color:'#2c74c4'},
-      {label:'Otros refilado',val:proc.otrosRef,color:'var(--muted)'}
-    ];
-    const procCard=`<div class="card"><div class="card-h"><h3>Anatomía del costo de proceso</h3><span class="tag">por kg que pasa por la línea · TC ${ars(tc)}</span></div>
-      <div class="card-b">${breakdownBar(procParts)}
-      <div class="tbl-wrap" style="margin-top:14px"><table><tbody>
-        <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">LAMINADO</td><td></td><td class="num">${usd(proc.subLam,4)}</td></tr>
-        <tr><td style="text-align:left"><b>Adhesivos + diluyente</b><span class="formula">suma de aportes (ver tabla adhesivos)</span></td><td class="num formula">${usd(proc.adhes,4)}</td><td class="num">${ars(proc.adhes*tc)}</td></tr>
-        <tr><td style="text-align:left"><b>MO laminado</b><span class="formula">$${nf(p.salLam)} × ${p.opLam} × ${p.cargasLam} ÷ ${p.prodLam} kg/h ÷ TC</span></td><td class="num formula">${usd(proc.MOlam,4)}</td><td class="num">${ars(proc.MOlam*tc)}</td></tr>
-        <tr><td style="text-align:left"><b>Energía laminado</b><span class="formula">${p.motoresLam} mot × ${p.consumoLam} kW × $${p.usdkwhLam} ÷ ${p.prodLam} kg/h</span></td><td class="num formula">${usd(proc.enerLam,4)}</td><td class="num">${ars(proc.enerLam*tc)}</td></tr>
-        <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">REFILADO</td><td></td><td class="num">${usd(proc.subRef,4)}</td></tr>
-        <tr><td style="text-align:left"><b>MO refilado</b><span class="formula">$${nf(p.salRef)} × ${p.opRef} × ${p.cargasRef} ÷ ${p.prodRef} kg/h ÷ TC</span></td><td class="num formula">${usd(proc.MOref,4)}</td><td class="num">${ars(proc.MOref*tc)}</td></tr>
-        <tr><td style="text-align:left"><b>Energía refilado</b><span class="formula">${p.motoresRef} mot × ${p.consumoRef} kW × $${p.usdkwhRef} ÷ ${p.prodRef} kg/h</span></td><td class="num formula">${usd(proc.enerRef,4)}</td><td class="num">${ars(proc.enerRef*tc)}</td></tr>
-        <tr><td style="text-align:left"><b>Otros refilado</b><span class="formula">directo de parámetros</span></td><td class="num formula">${usd(proc.otrosRef,4)}</td><td class="num">${ars(proc.otrosRef*tc)}</td></tr>
-        <tr class="total"><td style="text-align:left">TOTAL PROCESO POR KG</td><td></td><td class="num">${usd(proc.procKg,4)}</td></tr>
-      </tbody></table></div>
-      <div class="note" style="margin-top:8px">Se aplica sobre los <b>kg brutos</b> (PET+PE que entran al laminador), no sobre el kg final producido.</div></div></div>`;
+    const avgCost=rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1);
+    // --- anatomía de proceso clickeable ---
+    const pp=petpeProcParts(proc);
+    const procRow=(x)=>{ const open=petpeProcExp.has(x.key);
+      return `<tr class="clickrow" data-ppan="${x.key}" style="cursor:pointer"><td style="text-align:left;padding-left:18px"><b>${x.label}</b></td>
+        <td class="num">${usd(x.val,4)}</td><td class="num">${ars(x.val*tc)}</td><td class="num">${pct(x.val/(proc.procKg||1),1)}</td>
+        <td class="num"><span class="lnk">${open?'▲':'▼'}</span></td></tr>
+      ${open?`<tr class="exp-row"><td colspan="5"><div style="padding:6px 2px 6px 18px">${petpeProcDetail(x.key,proc,p,tc)}</div></td></tr>`:''}`; };
+    const procCard=`<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Anatomía del costo de proceso</h3><span class="tag">tocá cada componente · por kg que entra a la línea · TC ${ars(tc)}</span></div>
+      <div class="card-b">${breakdownBar(pp.map(x=>({label:x.label,val:x.val,color:x.color})))}
+      <div class="note" style="margin:10px 0 4px">Tocá cada componente para ver la fórmula. Se aplica sobre los <b>kg brutos</b> (PET+PE que entran al laminador).</div>
+      <div class="tbl-wrap"><table><thead><tr><th>Componente</th><th>USD/kg</th><th>ARS/kg</th><th>% proc.</th><th></th></tr></thead><tbody>
+        <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">LAMINADO</td><td class="num">${usd(proc.subLam,4)}</td><td class="num">${ars(proc.subLam*tc)}</td><td class="num">${pct(proc.subLam/(proc.procKg||1),1)}</td><td></td></tr>
+        ${pp.filter(x=>x.group==='lam').map(procRow).join('')}
+        <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">REFILADO</td><td class="num">${usd(proc.subRef,4)}</td><td class="num">${ars(proc.subRef*tc)}</td><td class="num">${pct(proc.subRef/(proc.procKg||1),1)}</td><td></td></tr>
+        ${pp.filter(x=>x.group==='ref').map(procRow).join('')}
+        <tr class="total"><td style="text-align:left">TOTAL PROCESO POR KG</td><td class="num">${usd(proc.procKg,4)}</td><td class="num">${ars(proc.procKg*tc)}</td><td class="num">100%</td><td></td></tr>
+      </tbody></table></div></div></div>`;
 
     const prodCost=`<div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>Costo por producto</h3><button class="btn sm primary" id="ppAdd" style="margin-left:auto">+ Producto</button></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th>Cliente</th><th>Medida</th><th>Ancho PET</th><th>Esp PET</th><th>Ancho PE</th><th>Esp PE</th><th>Ancho fin</th><th>Tiras</th><th>Costo</th><th></th><th></th></tr></thead><tbody>
+        <th>Cliente</th><th>Medida</th><th>A.PET</th><th>E.PET</th><th>A.PE</th><th>E.PE</th><th>A.fin</th><th>Tiras</th><th>Costo USD/kg</th><th></th><th></th></tr></thead><tbody>
         ${rows.map(r=>{ const open=ppExp.has(r.i);
           return `<tr>
-          <td><input class="tinp" style="max-width:110px;text-align:left;font-family:'IBM Plex Sans'" data-path="petpe.productos.${r.i}.cli" value="${r.cli}"></td>
-          <td><input class="tinp" style="max-width:78px;text-align:left;font-family:'IBM Plex Mono'" data-path="petpe.productos.${r.i}.med" value="${r.med}"></td>
-          <td>${nInp(`petpe.productos.${r.i}.aPET`,r.aPET,{w:60})}</td>
-          <td>${nInp(`petpe.productos.${r.i}.ePET`,r.ePET,{w:54})}</td>
-          <td>${nInp(`petpe.productos.${r.i}.aPE`,r.aPE,{w:60})}</td>
-          <td>${nInp(`petpe.productos.${r.i}.ePE`,r.ePE,{w:54})}</td>
-          <td>${nInp(`petpe.productos.${r.i}.aFin`,r.aFin,{w:60})}</td>
-          <td>${nInp(`petpe.productos.${r.i}.tiras`,r.tiras,{w:42})}</td>
-          <td class="num"><b>${usd(r.costo,3)}</b></td>
+          <td><input class="tinp" style="max-width:120px;text-align:left;font-family:'IBM Plex Sans'" data-path="petpe.productos.${r.i}.cli" value="${r.cli}"></td>
+          <td><input class="tinp" style="max-width:80px;text-align:left;font-family:'IBM Plex Mono'" data-path="petpe.productos.${r.i}.med" value="${r.med}"></td>
+          <td>${nInp(`petpe.productos.${r.i}.aPET`,r.aPET,{w:56})}</td>
+          <td>${nInp(`petpe.productos.${r.i}.ePET`,r.ePET,{w:50})}</td>
+          <td>${nInp(`petpe.productos.${r.i}.aPE`,r.aPE,{w:56})}</td>
+          <td>${nInp(`petpe.productos.${r.i}.ePE`,r.ePE,{w:50})}</td>
+          <td>${nInp(`petpe.productos.${r.i}.aFin`,r.aFin,{w:56})}</td>
+          <td>${nInp(`petpe.productos.${r.i}.tiras`,r.tiras,{w:40})}</td>
+          <td class="num"><b style="color:var(--teal)">${usd(r.costo,3)}</b><span class="formula">${ars(r.costo*tc)}/kg</span></td>
           <td><span class="lnk" data-exp="${r.i}">${open?'ocultar ▲':'desglose ▼'}</span></td>
           <td class="row-actions"><button class="mini-x" data-del-pp="${r.i}">✕</button></td></tr>
-          ${open?`<tr class="exp-row"><td colspan="11"><div class="exp-grid">
-            <div class="ei">Gramaje PET<b>${r.gPET.toFixed(1)} g/m²</b><span class="ef">${r.ePET}µm × ${p.densPET}</span></div>
-            <div class="ei">Gramaje PE<b>${r.gPE.toFixed(1)} g/m²</b><span class="ef">${r.ePE}µm × ${p.densPE}</span></div>
-            <div class="ei">% PET / % PE<b>${pct(r.pPET,0)} / ${pct(r.pPE,0)}</b><span class="ef">por peso</span></div>
-            <div class="ei">Yield PET / PE<b>${pct(r.yPET,1)} / ${pct(r.yPE,1)}</b><span class="ef">(ancho fin × tiras) ÷ ancho bobina</span></div>
-            <div class="ei">kg PET bruto<b>${r.kgPET.toFixed(3)}</b><span class="ef">% PET ÷ yield PET</span></div>
-            <div class="ei">kg PE bruto<b>${r.kgPE.toFixed(3)}</b><span class="ef">% PE ÷ yield PE</span></div>
-            <div class="ei">Costo PET<b>${usd(r.cPET,3)}</b><span class="ef">${r.kgPET.toFixed(3)} kg × ${usd(cPET,2)}</span></div>
-            <div class="ei">Costo PE<b>${usd(r.cPE,3)}</b><span class="ef">${r.kgPE.toFixed(3)} kg × ${usd(cPE,2)}</span></div>
-            <div class="ei">Costo proceso<b>${usd(r.cProc,3)}</b><span class="ef">${r.kgTot.toFixed(3)} kg × ${usd(proc.procKg,3)}</span></div>
-            <div class="ei">Costo total<b style="color:var(--teal)">${usd(r.costo,3)}</b><span class="ef">${ars(r.costo*tc)}/kg</span></div>
-          </div></td></tr>`:''}`;}).join('')}
+          ${open?`<tr class="exp-row"><td colspan="11"><div style="padding:4px 2px">${ppProductDetail(r,proc,cPET,cPE,p,tc)}</div></td></tr>`:''}`;}).join('')}
       </tbody></table></div>
-      <div class="note" style="margin-top:8px">Editá anchos de bobina, espesores y tiras. Tocá “desglose” para ver cómo se arma el costo de cada producto paso a paso.</div></div></div>`;
+      <div class="note" style="margin-top:8px">Editá anchos de bobina, espesores y tiras. Tocá “desglose” para ver, paso a paso, cómo se arma el costo de cada producto.</div></div></div>`;
 
     body=`
     <div class="grid g4" style="margin-bottom:16px">
-      <div class="card stat accent"><div class="k">Costo proceso</div><div class="v">${usd(proc.procKg,3)}<small>/kg</small></div><div class="d">lam ${usd(proc.subLam,3)} + ref ${usd(proc.subRef,3)}</div></div>
+      <div class="card stat accent"><div class="k">Costo prom. producto</div><div class="v">${usd(avgCost,3)}<small>/kg</small></div><div class="d">${rows.length} productos · ${ars(avgCost*tc)}/kg</div></div>
+      <div class="card stat"><div class="k">Costo de proceso</div><div class="v">${usd(proc.procKg,3)}<small>/kg</small></div><div class="d">lam ${usd(proc.subLam,3)} + ref ${usd(proc.subRef,3)}</div></div>
       <div class="card stat"><div class="k">Insumo lámina rPET</div><div class="v">${usd(cPET,2)}<small>/kg</small></div><div class="d">${p.linkPET?'vinculado a PET':'manual'}</div></div>
       <div class="card stat"><div class="k">Insumo film PE</div><div class="v">${usd(cPE,2)}<small>/kg</small></div><div class="d">${p.linkPE?'vinculado a Film PE':'manual'}</div></div>
-      <div class="card stat"><div class="k">Costo prom. producto</div><div class="v">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}<small>/kg</small></div><div class="d">${rows.length} productos</div></div>
     </div>
 
-    <div style="margin-bottom:16px">${procCard}</div>
-
     ${prodCost}
+
+    ${procCard}
 
     <div class="grid g2" style="margin-bottom:16px">
       <div class="card">
@@ -1707,12 +1694,15 @@ function renderPETPE(){
 
   $('#page-petpe').innerHTML=head+body;
   wireSub('petpe',renderPETPE);
-  $('#ppExport').onclick=exportPETPE;
-  $('#ppSim').onclick=openPpSim;
+  $('#ppExport').onclick=exportPpCompleto;
+  $('#ppCalc').onclick=openPpCalc;
+  $('#ppSave').onclick=ppSaveCost;
+  $('#ppHist').onclick=openPpCostHistory;
   if($('#ppAdd')) $('#ppAdd').onclick=()=>{ S.petpe.productos.push({cli:'Nuevo',med:'000x000',aPET:400,ePET:250,aPE:420,ePE:50,aFin:380,tiras:1,precio:3.5}); commit(); renderPETPE(); };
   $$('#page-petpe [data-del-pp]').forEach(b=>b.onclick=()=>{ S.petpe.productos.splice(+b.dataset.delPp,1); ppExp.clear(); commit(); renderPETPE(); });
   $$('#page-petpe [data-link]').forEach(c=>c.onchange=()=>{ S.petpe.params[c.dataset.link]=c.checked; commit(); renderPETPE(); });
   $$('#page-petpe [data-exp]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.exp; ppExp.has(i)?ppExp.delete(i):ppExp.add(i); renderPETPE(); });
+  $$('#page-petpe [data-ppan]').forEach(b=>b.onclick=()=>{ const k=b.dataset.ppan; petpeProcExp.has(k)?petpeProcExp.delete(k):petpeProcExp.add(k); renderPETPE(); });
 }
 
 /* ============================================================
@@ -2431,6 +2421,324 @@ async function exportPETPE(){
   ws.views=[{state:'frozen',ySplit:4}];
   await download(wb,'Winflex_LaminadoPETPE.xlsx');
 }
+
+/* ============================================================
+   LAMINADO PET/PE · anatomía proceso + desglose + calc + historial + Excel
+   ============================================================ */
+let petpeProcExp=new Set(), ppCalc=null;
+
+function petpeProcParts(proc){
+  return [
+    {key:'adhes',  label:'Adhesivos + diluyente', val:proc.adhes,   color:'var(--amber)', group:'lam'},
+    {key:'MOlam',  label:'MO laminado',           val:proc.MOlam,   color:'var(--teal)',  group:'lam'},
+    {key:'enerLam',label:'Energía laminado',      val:proc.enerLam, color:'var(--blue)',  group:'lam'},
+    {key:'MOref',  label:'MO refilado',           val:proc.MOref,   color:'var(--teal-d)',group:'ref'},
+    {key:'enerRef',label:'Energía refilado',      val:proc.enerRef, color:'#2c74c4',      group:'ref'},
+    {key:'otrosRef',label:'Otros refilado',       val:proc.otrosRef,color:'var(--muted)', group:'ref'}
+  ];
+}
+function petpeProcDetail(key,proc,p,tc){
+  if(key==='adhes'){
+    const rows=S.petpe.adhesivos.map(a=>`<tr><td style="text-align:left">${a.nom}</td><td class="num">${usd(a.usd,2)}</td><td class="num">${pct(a.pct,2)}</td><td class="num">${usd(a.usd*a.pct,4)}</td></tr>`).join('');
+    return `<div class="params-sub" style="margin-bottom:6px">Aporte de cada adhesivo = USD/kg × % aplicación</div>
+      <div class="tbl-wrap"><table><thead><tr><th>Adhesivo</th><th>USD/kg</th><th>% aplic.</th><th>Aporte</th></tr></thead><tbody>${rows}
+        <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= Adhesivos + diluyente</td><td></td><td></td><td class="num"><b>${usd(proc.adhes,4)}</b></td></tr></tbody></table></div>`;
+  }
+  if(key==='MOlam') return `<div class="formula">MO laminado = (salario × operarios × cargas) ÷ producción ÷ TC<br>= ($${nf(p.salLam)} × ${p.opLam} × ${p.cargasLam}) ÷ ${p.prodLam} kg/h ÷ ${ars(tc)} = <b>${usd(proc.MOlam,4)}/kg</b> (${ars(proc.MOlam*tc)}/kg)</div>`;
+  if(key==='enerLam') return `<div class="formula">Energía laminado = (motores × consumo × costo kWh) ÷ producción<br>= (${p.motoresLam} × ${p.consumoLam} kW × US$${p.usdkwhLam}/kWh) ÷ ${p.prodLam} kg/h = <b>${usd(proc.enerLam,4)}/kg</b> (${ars(proc.enerLam*tc)}/kg)</div>`;
+  if(key==='MOref') return `<div class="formula">MO refilado = (salario × operarios × cargas) ÷ producción ÷ TC<br>= ($${nf(p.salRef)} × ${p.opRef} × ${p.cargasRef}) ÷ ${p.prodRef} kg/h ÷ ${ars(tc)} = <b>${usd(proc.MOref,4)}/kg</b> (${ars(proc.MOref*tc)}/kg)</div>`;
+  if(key==='enerRef') return `<div class="formula">Energía refilado = (motores × consumo × costo kWh) ÷ producción<br>= (${p.motoresRef} × ${p.consumoRef} kW × US$${p.usdkwhRef}/kWh) ÷ ${p.prodRef} kg/h = <b>${usd(proc.enerRef,4)}/kg</b> (${ars(proc.enerRef*tc)}/kg)</div>`;
+  if(key==='otrosRef') return `<div class="formula">Otros refilado — valor directo de parámetros: <b>${usd(proc.otrosRef,4)}/kg</b> (${ars(proc.otrosRef*tc)}/kg)</div>`;
+  return '';
+}
+
+/* desglose detallado de un producto: geometría/rendimiento + armado del costo */
+function ppProductDetail(r,proc,cPET,cPE,p,tc){
+  const geo=`<div class="tbl-wrap"><table><thead><tr><th>Geometría y rendimiento</th><th>Cálculo</th><th>Valor</th></tr></thead><tbody>
+    <tr><td style="text-align:left">Gramaje PET</td><td class="formula" style="text-align:left">${r.ePET} µm × ${p.densPET}</td><td class="num">${r.gPET.toFixed(1)} g/m²</td></tr>
+    <tr><td style="text-align:left">Gramaje PE</td><td class="formula" style="text-align:left">${r.ePE} µm × ${p.densPE}</td><td class="num">${r.gPE.toFixed(1)} g/m²</td></tr>
+    <tr><td style="text-align:left">Peso total / m²</td><td class="formula" style="text-align:left">PET + PE</td><td class="num">${(r.gPET+r.gPE).toFixed(1)} g/m²</td></tr>
+    <tr><td style="text-align:left">% PET / % PE</td><td class="formula" style="text-align:left">por peso</td><td class="num">${pct(r.pPET,0)} / ${pct(r.pPE,0)}</td></tr>
+    <tr><td style="text-align:left">Yield PET</td><td class="formula" style="text-align:left">(${r.aFin} × ${r.tiras}) ÷ ${r.aPET}</td><td class="num">${pct(r.yPET,1)}</td></tr>
+    <tr><td style="text-align:left">Yield PE</td><td class="formula" style="text-align:left">(${r.aFin} × ${r.tiras}) ÷ ${r.aPE}</td><td class="num">${pct(r.yPE,1)}</td></tr>
+    <tr><td style="text-align:left">kg PET bruto</td><td class="formula" style="text-align:left">% PET ÷ yield PET</td><td class="num">${r.kgPET.toFixed(3)}</td></tr>
+    <tr><td style="text-align:left">kg PE bruto</td><td class="formula" style="text-align:left">% PE ÷ yield PE</td><td class="num">${r.kgPE.toFixed(3)}</td></tr>
+    <tr class="total"><td style="text-align:left">kg brutos totales</td><td></td><td class="num">${r.kgTot.toFixed(3)}</td></tr>
+  </tbody></table></div>`;
+  const cost=`<div class="tbl-wrap"><table><thead><tr><th>Armado del costo</th><th>Cálculo</th><th>USD/kg</th><th>ARS/kg</th></tr></thead><tbody>
+    <tr><td style="text-align:left">Lámina rPET</td><td class="formula" style="text-align:left">${r.kgPET.toFixed(3)} kg × ${usd(cPET,2)}</td><td class="num">${usd(r.cPET,3)}</td><td class="num">${ars(r.cPET*tc)}</td></tr>
+    <tr><td style="text-align:left">Film PE</td><td class="formula" style="text-align:left">${r.kgPE.toFixed(3)} kg × ${usd(cPE,2)}</td><td class="num">${usd(r.cPE,3)}</td><td class="num">${ars(r.cPE*tc)}</td></tr>
+    <tr><td style="text-align:left">Proceso</td><td class="formula" style="text-align:left">${r.kgTot.toFixed(3)} kg × ${usd(proc.procKg,3)}</td><td class="num">${usd(r.cProc,3)}</td><td class="num">${ars(r.cProc*tc)}</td></tr>
+    <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= Costo total</td><td></td><td class="num"><b>${usd(r.costo,3)}</b></td><td class="num">${ars(r.costo*tc)}</td></tr>
+  </tbody></table></div>`;
+  return `<div style="display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(290px,1fr))">${geo}${cost}</div>`;
+}
+
+/* ---------------- Calculadora PET/PE ---------------- */
+function ppCalcDefaults(){
+  const pr=S.petpe.productos[0]||{aPET:450,ePET:250,aPE:470,ePE:50,aFin:421,tiras:1,precio:3.5};
+  ppCalc={ geom:{aPET:pr.aPET,ePET:pr.ePET,aPE:pr.aPE,ePE:pr.ePE,aFin:pr.aFin,tiras:pr.tiras},
+    cPET:petpeCostPET(), cPE:petpeCostPE(), proc:petpeProc().procKg, tc:Math.round(TC()), precio:pr.precio||0, qty:1000 };
+}
+function ppCalcCompute(){
+  const c=ppCalc, g=c.geom, dPET=S.petpe.params.densPET, dPE=S.petpe.params.densPE, n=S.petpe.net;
+  const yPET=(g.aFin*g.tiras)/(g.aPET||1), yPE=(g.aFin*g.tiras)/(g.aPE||1);
+  const gPET=g.ePET*dPET, gPE=g.ePE*dPE, gTot=(gPET+gPE)||1;
+  const pPET=gPET/gTot, pPE=gPE/gTot;
+  const kgPET=pPET/(yPET||1), kgPE=pPE/(yPE||1), kgTot=kgPET+kgPE;
+  const cPET=kgPET*c.cPET, cPE=kgPE*c.cPE, cProc=kgTot*c.proc, costo=cPET+cPE+cProc;
+  const margenBruto=c.precio?(c.precio-costo)/c.precio:0;
+  const gastos=c.precio*(n.admin+n.iibb+n.dyc+n.financiero);
+  const preGan=c.precio-costo-gastos, gan=Math.max(0,preGan*n.ganancias);
+  const netoUSD=preGan-gan, margenNeto=c.precio?netoUSD/c.precio:0;
+  return {yPET,yPE,gPET,gPE,pPET,pPE,kgPET,kgPE,kgTot,cPET,cPE,cProc,costo,margenBruto,netoUSD,margenNeto,
+    totalUSD:costo*c.qty,totalARS:costo*c.tc*c.qty,arsU:costo*c.tc};
+}
+function ppCalcResultHTML(){
+  const c=ppCalc, r=ppCalcCompute(), s=semaforo(r.margenNeto);
+  const bar=breakdownBar([{label:'Lámina rPET',val:r.cPET,color:'var(--teal)'},{label:'Film PE',val:r.cPE,color:'var(--amber)'},{label:'Proceso',val:r.cProc,color:'var(--blue)'}]);
+  return `
+  <div class="gauto" style="margin-bottom:14px">
+    <div class="card stat accent"><div class="card-b stat"><div class="k">Costo unitario</div><div class="v">${usd(r.costo,3)}<small>/kg</small></div><div class="d">${ars(r.arsU)}/kg</div></div></div>
+    <div class="card stat"><div class="card-b stat"><div class="k">Total ${nf(c.qty)} kg</div><div class="v">${usd(r.totalUSD,2)}</div><div class="d">${ars(r.totalARS)}</div></div></div>
+    ${c.precio?`<div class="card stat"><div class="card-b stat"><div class="k">Margen neto</div><div class="v" style="color:var(--${s==='v'?'green':s==='a'?'amber':'red'})">${pct(r.margenNeto,1)}</div><div class="d">precio ${usd(c.precio,2)} · bruto ${pct(r.margenBruto,1)}</div></div></div>`:''}
+  </div>
+  <div class="card"><div class="card-b">${bar}
+    <div class="tbl-wrap" style="margin-top:12px"><table><tbody>
+      <tr><td style="text-align:left">kg PET bruto</td><td class="num">${r.kgPET.toFixed(3)}</td><td style="text-align:left">× ${usd(c.cPET,2)}</td><td class="num">${usd(r.cPET,3)}</td></tr>
+      <tr><td style="text-align:left">kg PE bruto</td><td class="num">${r.kgPE.toFixed(3)}</td><td style="text-align:left">× ${usd(c.cPE,2)}</td><td class="num">${usd(r.cPE,3)}</td></tr>
+      <tr><td style="text-align:left">kg totales</td><td class="num">${r.kgTot.toFixed(3)}</td><td style="text-align:left">× ${usd(c.proc,3)} proc</td><td class="num">${usd(r.cProc,3)}</td></tr>
+      <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= Costo unitario</td><td></td><td></td><td class="num"><b>${usd(r.costo,3)}</b></td></tr>
+    </tbody></table></div></div></div>`;
+}
+function openPpCalc(){
+  ppCalcDefaults();
+  const f=(id,lbl,unit,val,step)=>`<div class="field"><label>${lbl}<small>${unit}</small></label><div class="iw"><input type="number" ${step?'step="any"':''} id="${id}" value="${val}"></div></div>`;
+  openModal(`<div class="modal-h"><h3>🧮 Calculadora de costos — Laminado PET/PE</h3><button class="x" onclick="closeModal()">✕</button></div>
+   <div class="modal-b">
+     <div class="note" style="margin-bottom:12px">Cargá la geometría del producto y los costos de insumo/proceso y mirá el costo al instante. No toca tus datos; podés exportar el cálculo a Excel.</div>
+     <div class="gauto">
+       <div class="card"><div class="card-h"><h3>Geometría del producto</h3></div>
+         <div class="card-b"><div style="display:grid;gap:10px;grid-template-columns:1fr 1fr">
+           ${f('ppc_aPET','Ancho bobina PET','mm',ppCalc.geom.aPET)}
+           ${f('ppc_ePET','Espesor PET','µm',ppCalc.geom.ePET)}
+           ${f('ppc_aPE','Ancho bobina PE','mm',ppCalc.geom.aPE)}
+           ${f('ppc_ePE','Espesor PE','µm',ppCalc.geom.ePE)}
+           ${f('ppc_aFin','Ancho final','mm',ppCalc.geom.aFin)}
+           ${f('ppc_tiras','Tiras','u',ppCalc.geom.tiras)}
+         </div></div></div>
+       <div class="card"><div class="card-h"><h3>Costos y escenario</h3></div>
+         <div class="card-b"><div style="display:grid;gap:10px">
+           ${f('ppc_cPET','Costo lámina rPET','USD/kg',ppCalc.cPET,true)}
+           ${f('ppc_cPE','Costo film PE','USD/kg',ppCalc.cPE,true)}
+           ${f('ppc_proc','Costo de proceso','USD/kg',ppCalc.proc.toFixed(4),true)}
+           ${f('ppc_tc','Tipo de cambio','ARS/USD',ppCalc.tc)}
+           ${f('ppc_precio','Precio de venta (opc.)','USD/kg',ppCalc.precio,true)}
+           ${f('ppc_qty','Cantidad','kg',ppCalc.qty)}
+         </div></div></div>
+     </div>
+     <div id="ppCalcResult" style="margin-top:14px">${ppCalcResultHTML()}</div>
+   </div>
+   <div class="modal-foot"><button class="btn" id="ppCalcExport">⬇ Exportar cálculo (Excel)</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`,true);
+  function readAndRender(){
+    ppCalc.geom={ aPET:num($('#ppc_aPET').value), ePET:num($('#ppc_ePET').value), aPE:num($('#ppc_aPE').value),
+      ePE:num($('#ppc_ePE').value), aFin:num($('#ppc_aFin').value), tiras:num($('#ppc_tiras').value) };
+    ppCalc.cPET=num($('#ppc_cPET').value); ppCalc.cPE=num($('#ppc_cPE').value); ppCalc.proc=num($('#ppc_proc').value);
+    ppCalc.tc=num($('#ppc_tc').value)||TC(); ppCalc.precio=num($('#ppc_precio').value); ppCalc.qty=num($('#ppc_qty').value);
+    $('#ppCalcResult').innerHTML=ppCalcResultHTML();
+  }
+  ['ppc_aPET','ppc_ePET','ppc_aPE','ppc_ePE','ppc_aFin','ppc_tiras','ppc_cPET','ppc_cPE','ppc_proc','ppc_tc','ppc_precio','ppc_qty'].forEach(id=>$('#'+id).oninput=readAndRender);
+  $('#ppCalcExport').onclick=exportPpCalc;
+}
+async function exportPpCalc(){
+  const c=ppCalc, r=ppCalcCompute(), wb=new ExcelJS.Workbook(), ws=wb.addWorksheet('Cálculo');
+  const H=[{t:'Concepto',k:'k',w:30},{t:'Valor',k:'v',w:16},{t:'Detalle',k:'d',w:34}];
+  petTitle(wb,ws,'Laminado PET/PE · Cálculo de costo',H.length); setCols(ws,H); headerRow(ws,4,H);
+  const rows=[
+    {k:'Ancho/Espesor PET',v:c.geom.aPET,d:c.geom.ePET+' µm · gramaje '+r.gPET.toFixed(1)+' g/m²'},
+    {k:'Ancho/Espesor PE',v:c.geom.aPE,d:c.geom.ePE+' µm · gramaje '+r.gPE.toFixed(1)+' g/m²'},
+    {k:'Ancho final · tiras',v:c.geom.aFin,d:c.geom.tiras+' tiras'},
+    {k:'% PET / % PE',v:r.pPET,d:pct(r.pPET,0)+' / '+pct(r.pPE,0)},
+    {k:'kg PET bruto',v:r.kgPET,d:'× '+usd(c.cPET,2)+' = '+usd(r.cPET,3)},
+    {k:'kg PE bruto',v:r.kgPE,d:'× '+usd(c.cPE,2)+' = '+usd(r.cPE,3)},
+    {k:'kg totales',v:r.kgTot,d:'× '+usd(c.proc,3)+' proc = '+usd(r.cProc,3)},
+    {k:'COSTO UNITARIO',v:r.costo,d:'USD/kg · '+ars(r.arsU)+'/kg'},
+    {k:'Cantidad',v:c.qty,d:'kg · TC '+ars(c.tc)},
+    {k:'TOTAL',v:r.totalUSD,d:'USD · '+ars(r.totalARS)}
+  ];
+  if(c.precio) rows.push({k:'Precio / Margen neto',v:c.precio,d:'margen neto '+pct(r.margenNeto,1)+' · bruto '+pct(r.margenBruto,1)});
+  dataRows(ws,5,H,rows);
+  await download(wb,'Winflex_LaminadoPETPE_calculo.xlsx');
+}
+
+/* ---------------- Historial de costos PET/PE ---------------- */
+function ppSnapshot(label){
+  const proc=petpeProc(), cPET=petpeCostPET(), cPE=petpeCostPE();
+  const rows=S.petpe.productos.map(petpeRow);
+  const avgCost=rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1);
+  return { id:Date.now(), date:nowISO(), label:label||('Costo '+new Date().toLocaleDateString('es-AR')),
+    tc:TC(), proc:clone(proc), cPET, cPE, avgCost,
+    params:clone(S.petpe.params), adhesivos:clone(S.petpe.adhesivos), net:clone(S.petpe.net),
+    products:rows.map(r=>({cli:r.cli,med:r.med,costo:r.costo,precio:r.precio,margenNeto:r.margenNeto})) };
+}
+function ppSaveCost(){
+  openModal(`<div class="modal-h"><h3>💾 Guardar costo Laminado PET/PE</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b"><div class="note" style="margin-bottom:12px">Guarda una foto del costo actual (proceso, insumos, parámetros y costo de cada producto). Queda en el historial para consultar, imprimir o reactivar.</div>
+      <div class="field"><label>Etiqueta de la versión</label><div class="iw"><input id="ppSnapLabel" type="text" placeholder="Ej: Costos junio 2026" style="font-family:'IBM Plex Sans'"></div></div></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button><button class="btn primary" id="ppSnapSave">Guardar versión</button></div>`);
+  $('#ppSnapLabel').focus();
+  $('#ppSnapSave').onclick=()=>{
+    S.petpe.costHistory=S.petpe.costHistory||[];
+    S.petpe.costHistory.unshift(ppSnapshot($('#ppSnapLabel').value.trim()));
+    if(S.petpe.costHistory.length>50) S.petpe.costHistory.length=50;
+    commit(); closeModal(); toast('Costo guardado','ok');
+  };
+}
+function openPpCostHistory(){
+  S.petpe.costHistory=S.petpe.costHistory||[];
+  const cur=ppSnapshot('Costo actual');
+  const card=(active,h)=>`
+    <div style="border:1px solid ${active?'var(--teal)':'var(--line)'};background:${active?'var(--teal-l)':'var(--card)'};border-radius:12px;padding:12px 14px;margin-bottom:10px;cursor:pointer" data-pphpdf="${active?'__cur__':h.id}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div style="text-align:left"><div style="font-weight:700;font-size:14px">${active?'<span style="color:var(--teal)">● ACTIVO</span> — ':''}${h.label}</div>
+          <div class="note" style="margin-top:2px">${active?'Se actualiza con los parámetros vigentes':new Date(h.date).toLocaleString('es-AR')} · ${h.products.length} productos</div></div>
+        <div style="text-align:right;white-space:nowrap"><div class="mono" style="font-size:13px">costo prom. <b>${usd(h.avgCost,3)}</b>/kg</div>
+          <div class="note">proc ${usd(h.proc.procKg,3)} · TC ${ars(h.tc)}</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px" data-noclick>
+        <button class="btn sm" data-pppdf="${active?'__cur__':h.id}">📄 PDF</button>
+        ${active?'<span class="note" style="align-self:center">Costo en uso</span>'
+          :`<button class="btn sm primary" data-ppact="${h.id}">Activar</button><button class="btn sm" data-ppdel="${h.id}" style="color:var(--red)">Eliminar</button>`}
+      </div>
+    </div>`;
+  openModal(`<div class="modal-h"><h3>🕘 Historial de costos — Laminado PET/PE</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b">
+      <div class="note" style="margin-bottom:12px">La tarjeta resaltada es el costo <b>activo</b>. Tocá cualquier tarjeta para abrir su PDF. <b>Activar</b> restaura parámetros, adhesivos y márgenes de esa versión.</div>
+      ${card(true,cur)}
+      ${S.petpe.costHistory.length?S.petpe.costHistory.map(h=>card(false,h)).join('')
+        :'<div class="empty" style="padding:14px">Todavía no guardaste ningún costo. Usá “💾 Guardar costo”.</div>'}
+    </div>
+    <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`,true);
+  $$('#modal [data-pphpdf]').forEach(c=>c.onclick=e=>{ if(e.target.closest('[data-noclick]'))return; generatePpCostPDF(c.dataset.pphpdf); });
+  $$('#modal [data-pppdf]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); generatePpCostPDF(b.dataset.pppdf); });
+  $$('#modal [data-ppact]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); const h=S.petpe.costHistory.find(x=>x.id==b.dataset.ppact); if(!h)return;
+    if(!confirm(`¿Activar “${h.label}”? Se sobrescriben parámetros, adhesivos y márgenes actuales.`)) return;
+    S.petpe.params=clone(h.params); S.petpe.adhesivos=clone(h.adhesivos); S.petpe.net=clone(h.net);
+    commit(); closeModal(); renderPETPE(); toast('Costo activado','ok'); });
+  $$('#modal [data-ppdel]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); S.petpe.costHistory=S.petpe.costHistory.filter(x=>x.id!=b.dataset.ppdel); commit(); openPpCostHistory(); });
+}
+function generatePpCostPDF(id){
+  if(!window.jspdf||!window.jspdf.jsPDF){ toast('Generador de PDF no disponible','err'); return; }
+  let h; if(id==='__cur__') h=ppSnapshot('Costo actual'); else { h=(S.petpe.costHistory||[]).find(x=>x.id==id); if(!h){toast('Versión no encontrada','err');return;} }
+  const proc=h.proc, tc=h.tc;
+  const { jsPDF }=window.jspdf; const doc=new jsPDF({unit:'pt',format:'a4'}); const W=doc.internal.pageSize.getWidth();
+  doc.setFillColor(40,168,92); doc.rect(0,0,W,68,'F');
+  const logo=winflexLogoDataURL(); if(logo){ try{ doc.addImage(logo,/jpe?g/.test(logo)?'JPEG':'PNG',36,11,86,46); }catch(e){} }
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(15);
+  doc.text('WINFLEX S.A. — Costo Laminado PET/PE', W-36, 30, {align:'right'});
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  doc.text(`${h.label} · TC ${ars(tc)} · ${new Date().toLocaleDateString('es-AR')}`, W-36, 48, {align:'right'});
+  const pc=(v)=>pct(v/(proc.procKg||1),1);
+  doc.autoTable({ startY:84, theme:'grid', styles:{font:'helvetica',fontSize:9,cellPadding:4},
+    headStyles:{fillColor:[31,160,85],textColor:255}, columnStyles:{0:{halign:'left'}}, margin:{left:36,right:36},
+    head:[['Anatomía del proceso','USD/kg','ARS/kg','% proc.']],
+    body:[['LAMINADO — Adhesivos + diluyente',usd(proc.adhes,4),ars(proc.adhes*tc),pc(proc.adhes)],
+      ['LAMINADO — MO laminado',usd(proc.MOlam,4),ars(proc.MOlam*tc),pc(proc.MOlam)],
+      ['LAMINADO — Energía laminado',usd(proc.enerLam,4),ars(proc.enerLam*tc),pc(proc.enerLam)],
+      ['REFILADO — MO refilado',usd(proc.MOref,4),ars(proc.MOref*tc),pc(proc.MOref)],
+      ['REFILADO — Energía refilado',usd(proc.enerRef,4),ars(proc.enerRef*tc),pc(proc.enerRef)],
+      ['REFILADO — Otros refilado',usd(proc.otrosRef,4),ars(proc.otrosRef*tc),pc(proc.otrosRef)]],
+    foot:[['TOTAL PROCESO POR KG',usd(proc.procKg,4),ars(proc.procKg*tc),'100%']],
+    footStyles:{fillColor:[234,246,239],textColor:[14,122,58],fontStyle:'bold'} });
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(90);
+  doc.text(`Insumo lámina rPET: ${usd(h.cPET,2)}/kg   ·   Insumo film PE: ${usd(h.cPE,2)}/kg`, 36, doc.lastAutoTable.finalY+16);
+  doc.autoTable({ startY:doc.lastAutoTable.finalY+26, theme:'grid', styles:{font:'helvetica',fontSize:8.5,cellPadding:3.5},
+    headStyles:{fillColor:[31,160,85],textColor:255}, columnStyles:{0:{halign:'left'},1:{halign:'left'}}, margin:{left:36,right:36},
+    head:[['Cliente','Medida','Costo USD/kg','Precio USD/kg','M.Neto']],
+    body:h.products.map(pr=>[pr.cli,pr.med,usd(pr.costo,3),usd(pr.precio,2),pct(pr.margenNeto,1)]),
+    alternateRowStyles:{fillColor:[244,251,246]} });
+  doc.setFontSize(8); doc.setTextColor(120);
+  doc.text('Winflex S.A. · Envases especiales · Laminado PET/PE', 36, doc.internal.pageSize.getHeight()-24);
+  doc.output('dataurlnewwindow');
+}
+
+/* ---------------- Excel completo PET/PE ---------------- */
+async function ppSheetParametros(wb){
+  const p=S.petpe.params, ws=wb.addWorksheet('Parámetros');
+  const H=[{t:'Parámetro',k:'par',w:30},{t:'Valor',k:'val',w:16},{t:'Unidad',k:'uni',w:18}];
+  const rows=[{par:'Tipo de cambio',val:TC(),uni:'ARS/USD'},
+    {par:'Costo lámina rPET',val:p.costoLaminaPET,uni:'USD/kg'+(p.linkPET?' (vinculado PET)':'')},
+    {par:'Costo film PE',val:p.costoLaminaPE,uni:'USD/kg'+(p.linkPE?' (vinculado PE)':'')},
+    {par:'Densidad PET',val:p.densPET,uni:'g/cm³'},{par:'Densidad PE',val:p.densPE,uni:'g/cm³'},
+    {par:'— Laminado —',val:'',uni:''},
+    {par:'Salario operario',val:p.salLam,uni:'ARS/h'},{par:'Operarios',val:p.opLam,uni:'pers'},
+    {par:'Cargas',val:p.cargasLam,uni:'×'},{par:'Producción',val:p.prodLam,uni:'kg/h'},
+    {par:'Motores',val:p.motoresLam,uni:'u'},{par:'Consumo/motor',val:p.consumoLam,uni:'kW/h'},{par:'Costo energía',val:p.usdkwhLam,uni:'USD/kWh'},
+    {par:'— Refilado —',val:'',uni:''},
+    {par:'Salario operario',val:p.salRef,uni:'ARS/h'},{par:'Operarios',val:p.opRef,uni:'pers'},
+    {par:'Cargas',val:p.cargasRef,uni:'×'},{par:'Producción',val:p.prodRef,uni:'kg/h'},
+    {par:'Motores',val:p.motoresRef,uni:'u'},{par:'Consumo/motor',val:p.consumoRef,uni:'kW/h'},
+    {par:'Costo energía',val:p.usdkwhRef,uni:'USD/kWh'},{par:'Otros refilado',val:p.otrosRef,uni:'USD/kg'}];
+  petTitle(wb,ws,'Laminado PET/PE · Parámetros',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+}
+async function ppSheetAdhesivos(wb){
+  const proc=petpeProc(), ws=wb.addWorksheet('Adhesivos');
+  const H=[{t:'Adhesivo',k:'nom',w:38},{t:'USD/kg',k:'usd',w:12,fmt:XF.usd2},{t:'% aplic.',k:'pct',w:12,fmt:XF.pct},{t:'Aporte USD/kg',k:'ap',w:14,fmt:XF.usd4}];
+  petTitle(wb,ws,'Laminado PET/PE · Adhesivos',H.length); setCols(ws,H); headerRow(ws,4,H);
+  const rows=S.petpe.adhesivos.map(a=>({nom:a.nom,usd:a.usd,pct:a.pct,ap:a.usd*a.pct}));
+  dataRows(ws,5,H,rows); totalRow(ws,5+rows.length,H,{nom:'TOTAL ADHESIVOS',ap:proc.adhes});
+}
+async function ppSheetProceso(wb){
+  const proc=petpeProc(), tc=TC(), ws=wb.addWorksheet('Costo de proceso');
+  const H=[{t:'Componente',k:'comp',w:30},{t:'USD/kg',k:'usd',w:13,fmt:XF.usd4},{t:'ARS/kg',k:'ars',w:13,fmt:XF.ars},{t:'% proc.',k:'pc',w:11,fmt:XF.pct}];
+  petTitle(wb,ws,'Laminado PET/PE · Costo de proceso',H.length); setCols(ws,H); headerRow(ws,4,H);
+  const list=[['LAMINADO — Adhesivos + diluyente',proc.adhes],['LAMINADO — MO laminado',proc.MOlam],['LAMINADO — Energía laminado',proc.enerLam],
+    ['REFILADO — MO refilado',proc.MOref],['REFILADO — Energía refilado',proc.enerRef],['REFILADO — Otros refilado',proc.otrosRef]];
+  const rows=list.map(([comp,u])=>({comp,usd:u,ars:u*tc,pc:u/(proc.procKg||1)}));
+  dataRows(ws,5,H,rows); totalRow(ws,5+rows.length,H,{comp:'TOTAL PROCESO POR KG',usd:proc.procKg,ars:proc.procKg*tc,pc:1});
+}
+async function ppSheetProductos(wb){
+  const rows=S.petpe.productos.map(petpeRow), tc=TC(), ws=wb.addWorksheet('Costo productos');
+  const H=[{t:'Cliente',k:'cli',w:18},{t:'Medida',k:'med',w:12},{t:'A.PET',k:'aPET',w:8,fmt:XF.int},{t:'E.PET',k:'ePET',w:8,fmt:XF.int},
+    {t:'A.PE',k:'aPE',w:8,fmt:XF.int},{t:'E.PE',k:'ePE',w:8,fmt:XF.int},{t:'A.fin',k:'aFin',w:8,fmt:XF.int},{t:'Tiras',k:'tiras',w:7,fmt:XF.int},
+    {t:'kg/m²',k:'kgTot',w:9,fmt:'0.000'},{t:'Costo PET',k:'cPET',w:11,fmt:XF.usd3},{t:'Costo PE',k:'cPE',w:11,fmt:XF.usd3},
+    {t:'Costo proc.',k:'cProc',w:11,fmt:XF.usd3},{t:'Costo USD/kg',k:'costo',w:13,fmt:XF.usd3},{t:'ARS/kg',k:'arsk',w:12,fmt:XF.ars}];
+  petTitle(wb,ws,'Laminado PET/PE · Costo por producto',H.length); setCols(ws,H); headerRow(ws,4,H);
+  dataRows(ws,5,H,rows.map(r=>({...r,arsk:r.costo*tc})));
+  const nn=rows.length; totalRow(ws,5+nn,H,{cli:'PROMEDIO',costo:rows.reduce((a,r)=>a+r.costo,0)/nn,arsk:rows.reduce((a,r)=>a+r.costo,0)/nn*tc});
+  ws.views=[{state:'frozen',ySplit:4}];
+}
+async function ppSheetPrecios(wb){
+  const rows=S.petpe.productos.map(petpeRow), ws=wb.addWorksheet('Precios y márgenes');
+  const H=[{t:'Cliente',k:'cli',w:20},{t:'Medida',k:'med',w:12},{t:'Costo',k:'costo',w:12,fmt:XF.usd2},{t:'Precio',k:'precio',w:11,fmt:XF.usd2},
+    {t:'M.Bruto',k:'margenBruto',w:10,fmt:XF.pct},{t:'M.Neto USD',k:'netoUSD',w:12,fmt:XF.usd2},{t:'M.Neto %',k:'margenNeto',w:11,fmt:XF.pct,sem:true}];
+  petTitle(wb,ws,'Laminado PET/PE · Precios y márgenes',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  const nn=rows.length; totalRow(ws,5+nn,H,{cli:'PROMEDIO',costo:rows.reduce((a,r)=>a+r.costo,0)/nn,precio:rows.reduce((a,r)=>a+r.precio,0)/nn,
+    margenBruto:rows.reduce((a,r)=>a+r.margenBruto,0)/nn,netoUSD:rows.reduce((a,r)=>a+r.netoUSD,0)/nn,margenNeto:rows.reduce((a,r)=>a+r.margenNeto,0)/nn});
+  ws.views=[{state:'frozen',ySplit:4}];
+}
+async function ppSheetNotas(wb){
+  const ws=wb.addWorksheet('Notas');
+  const H=[{t:'Notas y supuestos',k:'n',w:96}];
+  const rows=[
+    {n:'Gramaje (g/m²) = espesor (µm) × densidad. % PET / % PE = gramaje de cada capa ÷ gramaje total.'},
+    {n:'Yield = (ancho final × tiras) ÷ ancho de bobina. kg bruto de cada capa = % capa ÷ yield de la capa.'},
+    {n:'Costo = kg PET × costo rPET + kg PE × costo PE + kg totales × costo de proceso.'},
+    {n:'El costo de proceso (laminado + refilado) se aplica sobre los kg brutos que entran a la línea.'},
+    {n:'Costo de proceso = adhesivos + MO laminado + energía laminado + MO refilado + energía refilado + otros refilado.'},
+    {n:'Margen neto = (precio − costo − gastos comerciales − impuesto a las ganancias) ÷ precio.'},
+    {n:'Los costos de rPET y PE pueden vincularse a los módulos PET Lámina y Film PE respectivamente.'},
+    {n:'Generado automáticamente desde la app de Costos & Precios de Winflex.'}
+  ];
+  petTitle(wb,ws,'Laminado PET/PE · Notas',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+}
+async function exportPpCompleto(){
+  const wb=new ExcelJS.Workbook();
+  await ppSheetParametros(wb); await ppSheetAdhesivos(wb); await ppSheetProceso(wb);
+  await ppSheetProductos(wb); await ppSheetPrecios(wb); await ppSheetNotas(wb);
+  await download(wb,'Winflex_LaminadoPETPE_Completo.xlsx');
+}
+
 async function exportBandejas(){
   const wb=new ExcelJS.Workbook(); const p=S.bandejas.params;
   const wc=wb.addWorksheet('Costos');

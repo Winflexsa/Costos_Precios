@@ -513,17 +513,20 @@ function deepMerge(base,ovr){ // mantener estructura si el seed creció
   return ovr!=null?ovr:base;
 }
 
+let LOAD_OK=false; // true solo si la lectura de la nube fue OK (o si es modo local); bloquea el guardado en la nube si falló
 async function loadState(){
-  let data=null;
+  let data=null; let cloudOK=false;
   if(useCloud()){
-    try{
-      if(!binId){ data=null; }
-      else{
+    if(!binId){ cloudOK=true; } // primer uso: se permite crear el bin
+    else{
+      try{
         const r=await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`,{headers:{'X-Master-Key':CONFIG.JSONBIN_KEY}});
-        if(r.ok){ const j=await r.json(); data=j.record; }
-      }
-    }catch(e){ console.warn('JSONBin load fail',e); }
-  }
+        if(r.ok){ const j=await r.json(); data=j.record; cloudOK=true; }
+        else { cloudOK=false; }
+      }catch(e){ console.warn('JSONBin load fail',e); cloudOK=false; }
+    }
+  } else { cloudOK=true; }
+  LOAD_OK = cloudOK;
   if(!data){ try{ data=JSON.parse(localStorage.getItem(CONFIG.LS_KEY)); }catch(e){} }
   S = data ? deepMerge(JSON.parse(JSON.stringify(SEED)), data) : JSON.parse(JSON.stringify(SEED));
 }
@@ -533,16 +536,17 @@ async function saveState(){
   S.meta.updated=nowISO();
   try{ localStorage.setItem(CONFIG.LS_KEY,JSON.stringify(S)); }catch(e){}
   if(useCloud()){
+    if(!LOAD_OK && binId){ console.warn('Carga falló: no se guarda en la nube para no pisar los precios. Recargá la página.'); return; }
     try{
       if(!binId){
         const r=await fetch('https://api.jsonbin.io/v3/b',{method:'POST',
-          headers:{'Content-Type':'application/json','X-Master-Key':CONFIG.JSONBIN_KEY,'X-Bin-Name':'winflex_costos'},
+          headers:{'Content-Type':'application/json','X-Master-Key':CONFIG.JSONBIN_KEY,'X-Bin-Name':'winflex_costos','X-Bin-Versioning':'true'},
           body:JSON.stringify(S)});
         if(r.ok){ const j=await r.json(); binId=j.metadata.id; console.log('Nuevo bin creado:',binId);
           alert('⚠ IMPORTANTE — Se creó un bin nuevo en JSONBin:\n\n'+binId+'\n\nPara que la PC y la tablet vean los MISMOS datos, pegá este ID en el archivo index.html, en JSONBIN_BIN_ID (bloque CONFIG, arriba de todo), y volvé a subirlo a GitHub.\n\nSi no lo fijás, cada dispositivo va a crear su propio bin y no se van a sincronizar.'); }
       }else{
         await fetch(`https://api.jsonbin.io/v3/b/${binId}`,{method:'PUT',
-          headers:{'Content-Type':'application/json','X-Master-Key':CONFIG.JSONBIN_KEY},body:JSON.stringify(S)});
+          headers:{'Content-Type':'application/json','X-Master-Key':CONFIG.JSONBIN_KEY,'X-Bin-Versioning':'true'},body:JSON.stringify(S)});
       }
     }catch(e){ console.warn('JSONBin save fail',e); }
   }

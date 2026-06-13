@@ -85,6 +85,7 @@ header.top{display:flex;align-items:center;gap:18px;padding:18px 4px 16px;flex-w
 
 /* nav */
 nav.tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:6px;box-shadow:var(--shadow);margin-bottom:22px;overflow-x:auto}
+body.modo-modulo #tabs{display:none}
 nav.tabs button{flex:1;min-width:120px;border:none;background:transparent;padding:11px 14px;border-radius:9px;font-weight:600;font-size:13.5px;color:var(--ink2);display:flex;align-items:center;justify-content:center;gap:8px;transition:.15s;white-space:nowrap}
 nav.tabs button .dot{width:9px;height:9px;border-radius:3px}
 nav.tabs button:hover{background:var(--line2)}
@@ -3311,7 +3312,7 @@ async function exportConsolidado(){
    ============================================================ */
 function tryLogin(){
   const inp=$('#pinInput'); const v=(inp.value||'').trim();
-  if(v===CONFIG.ADMIN_PIN){ $('#loginErr').textContent=''; enterApp(); }
+  if(v===CONFIG.ADMIN_PIN){ $('#loginErr').textContent=''; try{sessionStorage.setItem('winflex-cp-unlocked','1');}catch(e){} enterApp(); }
   else{
     $('#loginErr').textContent='PIN incorrecto';
     inp.classList.add('shake'); inp.value='';
@@ -3323,13 +3324,41 @@ async function enterApp(){
   await loadState();
   if(S.tc.mode==='auto') await fetchTC();
   renderTCBar(); renderActive();
+  if(ES_HIJA){
+    document.body.classList.add('modo-modulo');
+    try{document.title=(MODULOS[MODULO_VENTANA]||'')+' · Costos & Precios';}catch(e){}
+    navegarA(MODULO_VENTANA);
+  }
 }
-function setTab(tab){
+// ── NAVEGACIÓN POR VENTANAS (mismo sistema que Sueldos/Horas) ──────
+const MODULOS={dash:'📊 Resumen',pet:'🔵 PET Lámina',pe:'🟡 Film PE',petpe:'🟢 Laminado PET/PE',bandejas:'🟩 Bandejas'};
+const _paramTab=(function(){try{return new URLSearchParams(location.search).get('tab');}catch(_){return null;}})();
+const MODULO_VENTANA=(_paramTab&&MODULOS[_paramTab])?_paramTab:null;
+const ES_HIJA=!!MODULO_VENTANA;
+function navegarA(tab){
+  if(!MODULOS[tab])return;
+  if(document.body.classList.contains('modo-modulo')&&tab!==MODULO_VENTANA){document.body.classList.remove('modo-modulo');}
   activeTab=tab;
   $$('#tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+tab));
   renderActive();
 }
+function abrirModulo(tab){
+  if(!MODULOS[tab])return;
+  if(ES_HIJA&&tab===MODULO_VENTANA)return;
+  try{
+    const aw=(window.screen&&screen.availWidth)||1280,ah=(window.screen&&screen.availHeight)||800;
+    const ww=Math.min(1280,Math.round(aw*0.88)),wh=Math.min(900,Math.round(ah*0.92));
+    const idx=Object.keys(MODULOS).indexOf(tab),off=(idx%6)*28;
+    const left=Math.max(0,Math.round((aw-ww)/2)+off-70),top=Math.max(0,Math.round((ah-wh)/2)+off-40);
+    const feats=`popup=yes,toolbar=no,location=no,menubar=no,status=no,resizable=yes,scrollbars=yes,width=${ww},height=${wh},left=${left},top=${top}`;
+    const w=window.open('./index.html?tab='+encodeURIComponent(tab),'winflexcp_'+tab,feats);
+    if(w){try{w.focus();}catch(_){ } return;}
+  }catch(_){}
+  navegarA(tab);
+}
+// Compatibilidad: todas las llamadas a setTab(...) abren ahora una ventana.
+function setTab(tab){ return abrirModulo(tab); }
 
 function init(){
   const _bi=document.querySelector('.brand-img'),_li=document.querySelector('#login .logo-img');
@@ -3341,12 +3370,15 @@ function init(){
   $$('#tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
   $('#btnHistory').onclick=openHistory;
   $('#btnSettings').onclick=openSettings;
-  $('#btnLogout').onclick=()=>{ $('#pinInput').value=''; $('#app').style.display='none'; $('#login').style.display='flex'; $('#pinInput').focus(); };
+  $('#btnLogout').onclick=()=>{ try{sessionStorage.removeItem('winflex-cp-unlocked');}catch(e){} $('#pinInput').value=''; $('#app').style.display='none'; $('#login').style.display='flex'; $('#pinInput').focus(); };
   $('#tcInput').onchange=e=>{ S.tc.value=num(e.target.value); S.tc.mode='manual'; commit(); renderTCBar(); renderActive(); };
   $('#tcRefresh').onclick=()=>refreshTC(true);
   document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&$('#modalBg').classList.contains('open')) closeModal(); });
 }
 init();
+(function _bootSesion(){
+  try{ if(sessionStorage.getItem('winflex-cp-unlocked')==='1') enterApp(); }catch(e){}
+})();
 </script>
 </body>
 </html>

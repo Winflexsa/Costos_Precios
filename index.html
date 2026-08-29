@@ -276,6 +276,7 @@ td .formula{display:block;margin-top:3px;white-space:normal}
       <input id="tcInput" class="mono" type="number" step="1">
       <button class="btn sm ghost" id="tcRefresh" title="Traer dólar BNA">⟳ BNA</button>
     </div>
+    <button class="icon-btn" id="btnUndo" title="Deshacer" style="display:none">↶</button>
     <button class="icon-btn" id="btnHistory" title="Historial de listas">🕘</button>
     <button class="icon-btn" id="btnSettings" title="Configuración / sync">⚙️</button>
     <button class="icon-btn" id="btnLogout" title="Salir">⎋</button>
@@ -283,6 +284,7 @@ td .formula{display:block;margin-top:3px;white-space:normal}
 
   <nav class="tabs" id="tabs">
     <button data-tab="dash" class="active"><span class="dot" style="background:var(--ink)"></span>Resumen</button>
+    <button data-tab="clientes"><span class="dot" style="background:var(--red)"></span>Clientes</button>
     <button data-tab="pet"><span class="dot" style="background:var(--blue)"></span>PET Lámina</button>
     <button data-tab="pe"><span class="dot" style="background:var(--amber)"></span>Film PE</button>
     <button data-tab="petpe"><span class="dot" style="background:var(--teal)"></span>Laminado PET/PE</button>
@@ -290,6 +292,7 @@ td .formula{display:block;margin-top:3px;white-space:normal}
   </nav>
 
   <section class="page active" id="page-dash"></section>
+  <section class="page" id="page-clientes"></section>
   <section class="page" id="page-pet"></section>
   <section class="page" id="page-pe"></section>
   <section class="page" id="page-petpe"></section>
@@ -368,6 +371,7 @@ const SEED = {
       conoARSkg:1852, conoKgBobina:2, kgBobinaProd:200, palletARS:6500, palletCap:500,
       stretchPct:0.5, fletePallet:50000, pctFlete:1 },
     net:{ admin:0.02, iibb:0.035, dyc:0.015, financiero:0.03, ganancias:0.35 },
+    sem:{ v:0.30, a:0.15 },
     insumos:[
       {cod:"MP01",desc:"Preforma cristal molida",tipo:"PET reciclado",usd:1.15},
       {cod:"MP02",desc:"Scrap interno (recuperado)",tipo:"PET reciclado",usd:0.90},
@@ -444,6 +448,7 @@ const SEED = {
       {nom:"Diluyente poliuretánico",usd:2.33,pct:0.01}
     ],
     net:{ admin:0.02, iibb:0.035, dyc:0.015, financiero:0.03, ganancias:0.35 },
+    sem:{ v:0.30, a:0.15 },
     productos:[
       {cli:"Cadrinorte",med:"520x400",aPET:550,ePET:350,aPE:570,ePE:50,aFin:520,tiras:1,precio:4.09,ant:3.78},
       {cli:"Dantelli",med:"357x350",aPET:380,ePET:300,aPE:400,ePE:50,aFin:357,tiras:1,precio:3.69,ant:3.69},
@@ -615,6 +620,23 @@ function migrate(){
     S.bandejas.ensaladeras.forEach(e=>{ if(ENS[e.cli]) Object.assign(e.p, ENS[e.cli]); });
     m=4; changed=true;
   }
+  if(m < 5){
+    // el estado del precio pasa a ser dato estructurado: fecha (AAAA-MM) + tipo
+    const parse=(txt)=>{
+      const t=String(txt||'').toLowerCase();
+      let tipo=/no compra/.test(t)?'sin mov.':/cotiz/.test(t)?'cotizado':/fact/.test(t)?'facturado':/lista/.test(t)?'lista':null;
+      let ult=null;
+      let m1=/(\d{2})[\/](\d{4})/.exec(t);                       // 08/2026
+      if(m1) ult=m1[2]+'-'+m1[1];
+      else { const m2=/(\d{2})[\/](\d{2})[\/](\d{2})\b/.exec(t); // 27/08/26
+             if(m2) ult='20'+m2[3]+'-'+m2[2]; }
+      return {tipo,ult};
+    };
+    S.pet.clientes.forEach(c=>{ const p=parse(c.nota); if(c.ult==null) c.ult=p.ult; if(c.tipo==null) c.tipo=p.tipo; });
+    if(!S.pet.sem)   S.pet.sem={v:0.30,a:0.15};
+    if(!S.petpe.sem) S.petpe.sem={v:0.30,a:0.15};
+    m=5; changed=true;
+  }
   if(changed){ S.meta.migr=m; scheduleSave(); }
 }
 
@@ -783,16 +805,362 @@ function baMargen(precio,costo){
 function bandejaCostByCod(cod,sinCaja,fmtU){ const pr=S.bandejas.productos.find(x=>x.cod===cod); return pr?bandejaCost(pr,sinCaja,fmtU).usdMillar:0; }
 
 /* ============================================================
+   UX v2 — vista por cliente, pricing por margen objetivo,
+   armador de listas con vista previa, deshacer, pegar desde Excel
+   ============================================================ */
+
+/* ---- normalizacion de nombres para cruzar modulos ---- */
+function cliKey(n){
+  return String(n||'').toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\([^)]*\)/g,' ')
+    .replace(/[^A-Z0-9 ]/g,' ')
+    .replace(/\s+/g,' ').trim();
+}
+function mergeKey(k,keys){
+  for(const o of keys){ if(o!==k && o.length>=5 && (k.startsWith(o+' ')||k===o)) return o; }
+  return k;
+}
+
+/* ---- inversa del margen: que precio hace falta para un margen neto dado ---- */
+function precioParaMargen(costo,margen,net){
+  const G=net.admin+net.iibb+net.dyc+net.financiero, g=net.ganancias;
+  const den=(1-G)*(1-g)-margen;
+  if(den<=0.0001) return null;               // margen inalcanzable con esta estructura
+  return costo*(1-g)/den;
+}
+/* ---- precio piso: margen neto = 0 ---- */
+function precioPiso(costo,net){
+  const G=net.admin+net.iibb+net.dyc+net.financiero;
+  return costo/(1-G);
+}
+
+/* ---- estado del precio (antiguedad) ---- */
+function mesesDesde(ym){
+  if(!ym) return null;
+  const m=/(\d{4})-(\d{2})/.exec(ym); if(!m) return null;
+  const d=new Date(+m[1],+m[2]-1,1), h=new Date();
+  return (h.getFullYear()-d.getFullYear())*12+(h.getMonth()-d.getMonth());
+}
+function estadoChip(it){
+  const n=mesesDesde(it.ult);
+  if(it.activo===false) return '<span class="pill r" title="sin movimiento">inactivo</span>';
+  if(n==null) return '<span class="tag">sin fecha</span>';
+  if(n<=2) return `<span class="pill v">${it.tipo||'mov.'} · ${n===0?'este mes':n+'m'}</span>`;
+  if(n<=6) return `<span class="pill a">${it.tipo||'mov.'} · ${n}m</span>`;
+  return `<span class="pill r" title="precio viejo">${it.tipo||'mov.'} · ${n}m</span>`;
+}
+
+/* ---- deshacer: una sola marcha atras, la ultima operacion masiva ---- */
+let UNDO=null;
+function pushUndo(label){ UNDO={label,state:clone(S),at:new Date().toLocaleTimeString('es-AR')}; renderUndoBtn(); }
+function renderUndoBtn(){
+  const b=$('#btnUndo'); if(!b) return;
+  b.style.display=UNDO?'inline-flex':'none';
+  if(UNDO) b.title='Deshacer: '+UNDO.label+' ('+UNDO.at+')';
+}
+function doUndo(){
+  if(!UNDO) return;
+  const l=UNDO.label; S=UNDO.state; UNDO=null;
+  commit(); renderUndoBtn(); renderAll(); toast('Deshecho: '+l,'ok');
+}
+
+/* ============================================================
+   VISTA POR CLIENTE
+   ============================================================ */
+function clientesData(){
+  const vr=petVariantes(), map={};
+  const push=(nom,it)=>{ const k=cliKey(nom); (map[k]=map[k]||{nom,items:[]}).items.push(it); };
+
+  S.pet.clientes.forEach(c=>{ const r=petClientRow(c,vr);
+    push(c.cli,{mod:'PET Lámina',tag:'blue',det:r.variante,unidad:'USD/kg',
+      precio:r.precio,costo:r.costo,margen:r.margenNeto,activo:c.activo!==false,
+      ult:c.ult,tipo:c.tipo,ref:{t:'pet',i:S.pet.clientes.indexOf(c)}}); });
+
+  S.petpe.productos.forEach(p=>{ const r=petpeRow(p);
+    push(p.cli,{mod:'Laminado',tag:'teal',det:p.med,unidad:'USD/kg',
+      precio:r.precio,costo:r.costo,margen:r.margenNeto,activo:true,
+      ult:p.ult,tipo:p.tipo,revisar:!!p.revisar,ref:{t:'petpe',i:S.petpe.productos.indexOf(p)}}); });
+
+  S.bandejas.ensaladeras.forEach(e=>{ Object.entries(e.p).forEach(([cod,val])=>{
+    if(val==null) return;
+    const precio=e.mon==='USD'?val:val/TC(), costo=bandejaCostByCod(cod,e.cajaCli,e.fmt);
+    push(e.cli,{mod:'Ensaladeras',tag:'green',det:cod+(e.cajaCli?' · s/caja':''),unidad:'USD/millar',
+      precio,costo,margen:baMargen(precio,costo).margenNeto,activo:true,
+      ref:{t:'bandejas',i:S.bandejas.ensaladeras.indexOf(e)}}); }); });
+
+  // fusionar claves que son prefijo de otras (HUERTAS / HUERTAS DEL PILAR)
+  const keys=Object.keys(map), out={};
+  keys.forEach(k=>{ const mk=mergeKey(k,keys);
+    if(!out[mk]) out[mk]={nom:map[mk]?map[mk].nom:map[k].nom,items:[]};
+    out[mk].items=out[mk].items.concat(map[k].items); });
+
+  return Object.values(out).map(c=>{
+    const act=c.items.filter(i=>i.activo);
+    const base=act.length?act:c.items;
+    const avg=base.reduce((a,i)=>a+i.margen,0)/(base.length||1);
+    const peor=base.reduce((m,i)=>i.margen<m.margen?i:m,base[0]||{margen:0});
+    const mods=[...new Set(c.items.map(i=>i.mod))];
+    const meses=c.items.map(i=>mesesDesde(i.ult)).filter(x=>x!=null);
+    return {...c,n:c.items.length,nAct:act.length,avg,peor,mods,
+      antig:meses.length?Math.max(...meses):null};
+  }).sort((a,b)=>a.avg-b.avg);
+}
+
+let cliSearch='', cliExp=new Set();
+function renderClientes(){
+  const rows=clientesData();
+  const f=cliSearch?rows.filter(r=>cliKey(r.nom).includes(cliKey(cliSearch))):rows;
+  const nItems=rows.reduce((a,r)=>a+r.n,0);
+  const criticos=rows.filter(r=>r.avg<0.15).length;
+  const viejos=rows.filter(r=>r.antig!=null&&r.antig>6).length;
+
+  const head=`<div class="section-head"><div><h2>Clientes</h2>
+      <div class="sub">${rows.length} clientes · ${nItems} ítems de precio en las tres líneas</div></div>
+    <div class="sh-spacer"></div>
+    <div class="iw" style="max-width:250px"><input id="cliQ" type="text" placeholder="Buscar cliente…" value="${cliSearch}" style="font-family:'IBM Plex Sans'"></div>
+  </div>`;
+
+  const body=`
+  <div class="grid g4" style="margin-bottom:16px">
+    <div class="card stat accent"><div class="k">Clientes</div><div class="v">${rows.length}</div><div class="d">${nItems} ítems de precio</div></div>
+    <div class="card stat"><div class="k">Margen crítico</div><div class="v" style="color:var(--red)">${criticos}</div><div class="d">clientes bajo 15% promedio</div></div>
+    <div class="card stat"><div class="k">Precios viejos</div><div class="v" style="color:var(--amber)">${viejos}</div><div class="d">sin movimiento hace +6 meses</div></div>
+    <div class="card stat"><div class="k">Multilínea</div><div class="v">${rows.filter(r=>r.mods.length>1).length}</div><div class="d">compran en más de una línea</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><h3>Cartera por cliente</h3><span class="tag">ordenado por margen, del peor al mejor</span></div>
+    <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
+      <th>Cliente</th><th>Líneas</th><th>Ítems</th><th>Margen neto prom.</th><th>Peor ítem</th><th>Últ. mov.</th><th>Estado</th><th></th></tr></thead><tbody>
+      ${f.map((r,idx)=>{ const s=semaforo(r.avg); const open=cliExp.has(r.nom);
+        return `<tr>
+        <td style="text-align:left"><b>${r.nom}</b></td>
+        <td style="text-align:left">${r.mods.map(m=>`<span class="chip">${m}</span>`).join(' ')}</td>
+        <td class="num">${r.n}${r.nAct<r.n?` <span class="tag">${r.n-r.nAct} inact.</span>`:''}</td>
+        <td class="num"><b>${pct(r.avg,1)}</b></td>
+        <td style="text-align:left" class="formula">${r.peor.det||'—'} · ${pct(r.peor.margen,1)}</td>
+        <td class="num">${r.antig==null?'—':r.antig+' m'}</td>
+        <td><span class="pill ${s}">${semLabel(s)}</span></td>
+        <td><span class="lnk" data-cli="${r.nom}">${open?'ocultar ▲':'ver ▼'}</span></td></tr>
+        ${open?`<tr class="exp-row"><td colspan="8"><div style="padding:6px 2px">${clienteDetalle(r)}</div></td></tr>`:''}`;}).join('')}
+    </tbody></table></div>
+    <div class="note" style="margin-top:8px">El margen del cliente es el <b>promedio simple</b> de sus ítems: todavía no hay volúmenes cargados, así que un producto que le vendés poco pesa lo mismo que uno que le vendés mucho. Cuando carguemos los kg, esto pasa a ser ponderado.</div>
+    </div></div>`;
+
+  $('#page-clientes').innerHTML=head+body;
+  $('#cliQ').oninput=e=>{ cliSearch=e.target.value; renderClientes(); const i=$('#cliQ'); i.focus(); i.setSelectionRange(i.value.length,i.value.length); };
+  $$('#page-clientes [data-cli]').forEach(b=>b.onclick=()=>{ const k=b.dataset.cli;
+    cliExp.has(k)?cliExp.delete(k):cliExp.add(k); renderClientes(); });
+}
+
+function clienteDetalle(r){
+  const net=S.pet.net;
+  return `<div class="tbl-wrap"><table><thead><tr>
+    <th>Línea</th><th>Producto</th><th>Precio</th><th>Costo</th><th>Margen $</th><th>Margen %</th><th>Precio piso</th><th>Estado</th></tr></thead><tbody>
+    ${r.items.map(i=>{ const s=semaforo(i.margen); const piso=precioPiso(i.costo,net);
+      const dec=i.unidad==='USD/millar'?2:3;
+      return `<tr${i.activo?'':' style="opacity:.5"'}>
+        <td><span class="chip ${i.tag}">${i.mod}</span></td>
+        <td style="text-align:left">${i.det}${i.revisar?' <span class="tag" title="geometría a confirmar">revisar</span>':''}</td>
+        <td class="num">${usd(i.precio,dec)}</td>
+        <td class="num">${usd(i.costo,dec)}</td>
+        <td class="num">${usd(i.precio-i.costo,dec)}</td>
+        <td class="num"><b>${pct(i.margen,1)}</b></td>
+        <td class="num" title="precio con margen neto cero">${usd(piso,dec)}</td>
+        <td><span class="pill ${s}">${semLabel(s)}</span> ${estadoChip(i)}</td></tr>`;}).join('')}
+  </tbody></table></div>
+  <div class="note" style="margin-top:6px"><b>Precio piso</b>: el precio al que ese ítem deja de dejar margen neto. Es el número para tener a mano en una negociación.</div>`;
+}
+
+/* ============================================================
+   ARMADOR DE LISTAS — margen objetivo -> precio, con vista previa
+   ============================================================ */
+function listaFilas(mod){
+  if(mod==='pet'){ const vr=petVariantes();
+    return S.pet.clientes.map((c,i)=>{ const r=petClientRow(c,vr);
+      return {i,nom:c.cli,det:r.variante,precio:r.precio,costo:r.costo,margen:r.margenNeto,
+        activo:c.activo!==false,dec:3,net:S.pet.net,set:v=>{ S.pet.clientes[i].ant=S.pet.clientes[i].act; S.pet.clientes[i].act=v; }}; }); }
+  if(mod==='petpe'){
+    return S.petpe.productos.map((p,i)=>{ const r=petpeRow(p);
+      return {i,nom:p.cli,det:p.med,precio:r.precio,costo:r.costo,margen:r.margenNeto,
+        activo:true,dec:3,net:S.petpe.net,set:v=>{ S.petpe.productos[i].ant=S.petpe.productos[i].precio; S.petpe.productos[i].precio=v; }}; }); }
+  if(mod==='bandejas'){ const out=[];
+    S.bandejas.ensaladeras.forEach((e,ei)=>{ Object.keys(e.p).forEach(cod=>{
+      const precio=e.mon==='USD'?e.p[cod]:e.p[cod]/TC(), costo=bandejaCostByCod(cod,e.cajaCli,e.fmt);
+      out.push({i:ei+'|'+cod,nom:e.cli,det:cod,precio,costo,margen:baMargen(precio,costo).margenNeto,
+        activo:true,dec:2,net:S.bandejas.net,
+        set:v=>{ S.bandejas.ensaladeras[ei].p[cod]= e.mon==='USD'? v : Math.round(v*TC()); }}); }); });
+    Object.keys(S.bandejas.clamshells).forEach(cod=>{
+      const precio=S.bandejas.clamshells[cod], costo=bandejaCostByCod(cod);
+      out.push({i:'cl|'+cod,nom:'Lista clamshells',det:cod,precio,costo,margen:baMargen(precio,costo).margenNeto,
+        activo:true,dec:2,net:S.bandejas.net,set:v=>{ S.bandejas.clamshells[cod]=Math.round(v*100)/100; }}); });
+    return out; }
+  return [];
+}
+
+let armador={mod:'pet',objetivo:25,topeMax:10,soloBajo:true,umbral:20,redondeo:0.01,noBajar:true};
+function armadorCalc(){
+  const a=armador, rows=listaFilas(a.mod);
+  return rows.map(r=>{
+    let nuevo=r.precio, motivo='sin cambio';
+    if(!r.activo){ motivo='inactivo'; return {...r,nuevo,motivo,delta:0,margenNuevo:r.margen}; }
+    if(a.soloBajo && r.margen*100 >= a.umbral){ motivo=`ya está sobre ${a.umbral}%`; return {...r,nuevo,motivo,delta:0,margenNuevo:r.margen}; }
+    const ideal=precioParaMargen(r.costo,a.objetivo/100,r.net);
+    if(ideal==null){ motivo='objetivo inalcanzable'; return {...r,nuevo,motivo,delta:0,margenNuevo:r.margen}; }
+    nuevo=ideal; motivo=`a ${a.objetivo}% de margen`;
+    const tope=r.precio*(1+a.topeMax/100);
+    if(nuevo>tope){ nuevo=tope; motivo=`limitado por el tope de +${a.topeMax}%`; }
+    if(a.noBajar && nuevo<r.precio){ nuevo=r.precio; motivo='no se baja'; }
+    if(a.redondeo>0) nuevo=Math.round(nuevo/a.redondeo)*a.redondeo;
+    const mn=(function(){ const n=r.net,G=n.admin+n.iibb+n.dyc+n.financiero;
+      const g=nuevo*G, pre=nuevo-r.costo-g, gan=Math.max(0,pre*n.ganancias);
+      return nuevo?(pre-gan)/nuevo:0; })();
+    return {...r,nuevo,motivo,delta:r.precio?(nuevo-r.precio)/r.precio:0,margenNuevo:mn};
+  });
+}
+function openArmador(mod){
+  armador.mod=mod||'pet';
+  const nombres={pet:'PET Lámina',petpe:'Laminado PET/PE',bandejas:'Bandejas'};
+  const fld=(id,lbl,val,unit,step)=>`<div class="field"><label>${lbl}<small>${unit||''}</small></label><div class="iw"><input type="number" step="${step||'any'}" id="${id}" value="${val}"></div></div>`;
+  openModal(`
+    <div class="modal-h"><h3>🏷️ Armar lista nueva · ${nombres[armador.mod]}</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b">
+      <div class="note" style="margin-bottom:12px">En vez de aplicar un % parejo, definís el <b>margen que querés</b> y la app calcula el precio que hace falta en cada fila. Nada se aplica hasta que confirmes, y antes de aplicar se guarda una versión automáticamente.</div>
+      <div class="params-grid">
+        ${fld('arObj','Margen neto objetivo','%',' ','0.5').replace('value="%"',`value="${armador.objetivo}"`)}
+        ${fld('arTope','Aumento máximo por fila',armador.topeMax,'%','0.5')}
+        ${fld('arUmb','Aplicar solo si está bajo',armador.umbral,'%','0.5')}
+        ${fld('arRed','Redondeo',armador.redondeo,'USD','0.01')}
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;margin:10px 0;font-size:13px">
+        <input type="checkbox" id="arSolo" ${armador.soloBajo?'checked':''}> Tocar solo las filas que están por debajo del umbral</label>
+      <label style="display:flex;gap:8px;align-items:center;margin:0 0 12px;font-size:13px">
+        <input type="checkbox" id="arNoBaja" ${armador.noBajar?'checked':''}> Nunca bajar un precio</label>
+      <div id="arPrev"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn amber" id="arApply">Aplicar la lista propuesta</button>
+    </div>`,true);
+  const lee=()=>{ armador.objetivo=num($('#arObj').value); armador.topeMax=num($('#arTope').value);
+    armador.umbral=num($('#arUmb').value); armador.redondeo=num($('#arRed').value);
+    armador.soloBajo=$('#arSolo').checked; armador.noBajar=$('#arNoBaja').checked; prev(); };
+  function prev(){
+    const rows=armadorCalc(), cambian=rows.filter(r=>Math.abs(r.delta)>1e-9);
+    const avgAnt=rows.reduce((a,r)=>a+r.margen,0)/(rows.length||1);
+    const avgNew=rows.reduce((a,r)=>a+r.margenNuevo,0)/(rows.length||1);
+    $('#arPrev').innerHTML=`
+      <div class="grid g4" style="margin:14px 0">
+        <div class="card stat accent"><div class="card-b stat"><div class="k">Filas que cambian</div><div class="v">${cambian.length}</div><div class="d">de ${rows.length}</div></div></div>
+        <div class="card stat"><div class="card-b stat"><div class="k">Margen prom. antes</div><div class="v">${pct(avgAnt,1)}</div></div></div>
+        <div class="card stat"><div class="card-b stat"><div class="k">Margen prom. después</div><div class="v" style="color:var(--green)">${pct(avgNew,1)}</div><div class="d">${((avgNew-avgAnt)*100).toFixed(1)} pts</div></div></div>
+        <div class="card stat"><div class="card-b stat"><div class="k">Aumento prom.</div><div class="v">${pct(cambian.reduce((a,r)=>a+r.delta,0)/(cambian.length||1),1)}</div><div class="d">solo las que cambian</div></div></div>
+      </div>
+      <div class="tbl-wrap" style="max-height:340px;overflow:auto"><table><thead><tr>
+        <th>Cliente</th><th>Producto</th><th>Costo</th><th>Precio hoy</th><th>Propuesto</th><th>Δ</th><th>Margen hoy</th><th>Margen nuevo</th><th>Criterio</th></tr></thead><tbody>
+        ${rows.map(r=>`<tr${Math.abs(r.delta)>1e-9?'':' style="opacity:.45"'}>
+          <td style="text-align:left">${r.nom}</td><td style="text-align:left">${r.det}</td>
+          <td class="num">${usd(r.costo,r.dec)}</td>
+          <td class="num">${usd(r.precio,r.dec)}</td>
+          <td class="num"><b>${usd(r.nuevo,r.dec)}</b></td>
+          <td class="num" style="color:${r.delta>0?'var(--green)':'var(--ink2)'}">${r.delta?pct(r.delta,1):'—'}</td>
+          <td class="num">${pct(r.margen,1)}</td>
+          <td class="num"><b>${pct(r.margenNuevo,1)}</b></td>
+          <td style="text-align:left" class="formula">${r.motivo}</td></tr>`).join('')}
+      </tbody></table></div>`;
+  }
+  ['arObj','arTope','arUmb','arRed'].forEach(id=>$('#'+id).oninput=lee);
+  ['arSolo','arNoBaja'].forEach(id=>$('#'+id).onchange=lee);
+  prev();
+  $('#arApply').onclick=()=>{
+    const rows=armadorCalc().filter(r=>Math.abs(r.delta)>1e-9);
+    if(!rows.length){ toast('No hay ninguna fila para cambiar','err'); return; }
+    if(!confirm(`Se van a actualizar ${rows.length} precios de ${nombres[armador.mod]}.\n\nSe guarda una versión automática antes, y podés deshacer con el botón ↶ de arriba.`)) return;
+    pushUndo('lista nueva de '+nombres[armador.mod]);
+    S.history.unshift({id:Date.now(),date:nowISO(),
+      label:`Auto · antes de armar lista ${nombres[armador.mod]} (objetivo ${armador.objetivo}%)`,snap:priceSnapshot()});
+    if(S.history.length>50) S.history.length=50;
+    rows.forEach(r=>r.set(r.nuevo));
+    commit(); closeModal(); renderAll(); toast(`${rows.length} precios actualizados`,'ok');
+  };
+}
+
+/* ============================================================
+   PEGAR PRECIOS DESDE EXCEL
+   ============================================================ */
+function openPegar(mod){
+  const nombres={pet:'PET Lámina',petpe:'Laminado PET/PE'};
+  openModal(`
+    <div class="modal-h"><h3>📋 Pegar precios desde Excel · ${nombres[mod]}</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b">
+      <div class="note" style="margin-bottom:12px">Copiá de tu Excel dos o tres columnas y pegalas acá:
+      <b>${mod==='pet'?'Cliente · Variante (opcional) · Precio':'Cliente · Medida · Precio'}</b>.
+      Se emparejan por nombre; lo que no matchee se te muestra y no se toca.</div>
+      <textarea id="pgTxt" style="width:100%;height:170px;font-family:'IBM Plex Mono';font-size:12px;border:1px solid var(--line);border-radius:8px;padding:10px" placeholder="BLIGRAF&#9;rPET Cristal&#9;2,68&#10;BLIBOX&#9;rPET Cristal&#9;2,76"></textarea>
+      <div id="pgPrev" style="margin-top:12px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn amber" id="pgApply">Aplicar los que coinciden</button>
+    </div>`,true);
+
+  function parse(){
+    const txt=$('#pgTxt').value.trim(); if(!txt) return [];
+    return txt.split(/\r?\n/).map(l=>l.split(/\t|;|\s{2,}/).map(x=>x.trim()).filter(x=>x!=='')).filter(p=>p.length>=2);
+  }
+  function match(){
+    const filas=listaFilas(mod);
+    return parse().map(p=>{
+      const precio=num(p[p.length-1]);
+      const nom=p[0], det=p.length>=3?p[1]:null;
+      let cand=filas.filter(f=>cliKey(f.nom)===cliKey(nom));
+      if(!cand.length) cand=filas.filter(f=>cliKey(f.nom).startsWith(cliKey(nom))||cliKey(nom).startsWith(cliKey(f.nom)));
+      if(det) { const d=cand.filter(f=>cliKey(f.det)===cliKey(det)); if(d.length) cand=d; }
+      return {nom,det,precio,cand,ok:cand.length===1&&precio>0};
+    });
+  }
+  function prev(){
+    const m=match(), ok=m.filter(x=>x.ok);
+    $('#pgPrev').innerHTML=!m.length?'':`
+      <div style="margin-bottom:8px;font-size:13px"><b>${ok.length}</b> de ${m.length} filas se pueden aplicar.</div>
+      <div class="tbl-wrap" style="max-height:240px;overflow:auto"><table><thead><tr>
+        <th>Pegado</th><th>Coincide con</th><th>Precio hoy</th><th>Precio nuevo</th><th></th></tr></thead><tbody>
+      ${m.map(x=>`<tr${x.ok?'':' style="opacity:.5"'}>
+        <td style="text-align:left">${x.nom}${x.det?' · '+x.det:''}</td>
+        <td style="text-align:left">${x.cand.length===1?x.cand[0].nom+' · '+x.cand[0].det:(x.cand.length?x.cand.length+' coincidencias':'sin coincidencia')}</td>
+        <td class="num">${x.cand.length===1?usd(x.cand[0].precio,3):'—'}</td>
+        <td class="num"><b>${x.precio?usd(x.precio,3):'—'}</b></td>
+        <td>${x.ok?'<span class="pill v">ok</span>':'<span class="pill r">se ignora</span>'}</td></tr>`).join('')}
+      </tbody></table></div>`;
+  }
+  $('#pgTxt').oninput=prev; prev();
+  $('#pgApply').onclick=()=>{
+    const ok=match().filter(x=>x.ok);
+    if(!ok.length){ toast('No hay filas para aplicar','err'); return; }
+    if(!confirm(`Se van a actualizar ${ok.length} precios. Podés deshacer con el botón ↶.`)) return;
+    pushUndo('pegar precios en '+nombres[mod]);
+    ok.forEach(x=>x.cand[0].set(x.precio));
+    commit(); closeModal(); renderAll(); toast(`${ok.length} precios actualizados`,'ok');
+  };
+}
+
+/* ============================================================
    PATH ENGINE + RENDER PLUMBING
    ============================================================ */
 function getPath(p){ return p.split('.').reduce((o,k)=>o?.[/^\d+$/.test(k)?+k:k], S); }
+const _RANGO={merma:[0,.9],recuperacion:[0,1],cargas:[1,3],stretchPct:[0,3],pctFlete:[0,1],
+  admin:[0,.5],iibb:[0,.5],dyc:[0,.5],financiero:[0,.5],ganancias:[0,.6]};
 function setPath(p,val){ const ks=p.split('.'); let o=S;
+  const _k=ks[ks.length-1], _r=_RANGO[_k];
+  if(_r && typeof val==='number' && (val<_r[0]||val>_r[1])){
+    toast(_k+' fuera de rango ('+_r[0]+'-'+_r[1]+'): se ignora','err'); return; }
   for(let i=0;i<ks.length-1;i++){ const k=/^\d+$/.test(ks[i])?+ks[i]:ks[i]; o=o[k]; }
   const last=ks[ks.length-1]; o[/^\d+$/.test(last)?+last:last]=val; }
 
 let activeTab='dash';
 function renderActive(){
-  ({dash:renderDash,pet:renderPET,pe:renderPE,petpe:renderPETPE,bandejas:renderBandejas}[activeTab])();
+  ({dash:renderDash,clientes:renderClientes,pet:renderPET,pe:renderPE,petpe:renderPETPE,bandejas:renderBandejas}[activeTab])();
 }
 function renderAll(){ renderTCBar(); renderActive(); }
 
@@ -855,7 +1223,8 @@ function moduleSummary(){
   const bMax=bRows.reduce((m,r)=>r.m>m.m?r:m,bRows[0]||{m:0});
 
   const dist=(rows,acc,sg=0.30,sa=0.15)=>{ let g=0,y=0,r=0; rows.forEach(x=>{const s=semaforo(acc(x),sg,sa); if(s==='v')g++;else if(s==='a')y++;else r++;}); return {g,y,r,n:rows.length}; };
-  const petD=dist(petC,c=>c.margenNeto), ppD=dist(ppRows,r=>r.margenNeto), bD=dist(bRows,r=>r.m,bp.semVerde,bp.semAmarillo);
+  const sp=S.pet.sem||{v:.30,a:.15}, spp=S.petpe.sem||{v:.30,a:.15};
+  const petD=dist(petC,c=>c.margenNeto,sp.v,sp.a), ppD=dist(ppRows,r=>r.margenNeto,spp.v,spp.a), bD=dist(bRows,r=>r.m,bp.semVerde,bp.semAmarillo);
 
   // margen neto combinado (PET + Laminado)
   const netoItems=petC.length+ppRows.length+bRows.length;
@@ -1033,6 +1402,8 @@ function renderPET(){
   const head=`<div class="section-head"><div><h2>PET Lámina</h2><div class="sub">${S.pet.variantes.length} variantes rPET/PET virgen · ${rows.length} clientes</div></div>
     <div class="sh-spacer"></div>
     <button class="btn" id="petSim">🧮 Calculadora</button>
+    ${sub==='precios'?`<button class="btn amber" id="petArm">🏷️ Armar lista</button>
+    <button class="btn" id="petPeg">📋 Pegar de Excel</button>`:''}
     <button class="btn" id="petExport">⬇ Excel ▾</button>
   </div>
   ${subnav('pet',[{id:'costos',label:'🧮 Costos'},{id:'precios',label:'🏷️ Precios'}])}`;
@@ -1206,6 +1577,8 @@ function renderPET(){
   wireSub('pet',renderPET);
   $('#petExport').onclick=openPetExportMenu;
   $('#petSim').onclick=openPetCalc;
+  if($('#petArm')) $('#petArm').onclick=()=>openArmador('pet');
+  if($('#petPeg')) $('#petPeg').onclick=()=>openPegar('pet');
   if(sub==='costos'){
     $$('#page-pet [data-vrow]').forEach(r=>r.onclick=()=>{ const i=+r.dataset.vrow; petVarExp.has(i)?petVarExp.delete(i):petVarExp.add(i); renderPET(); });
   } else {
@@ -1738,6 +2111,8 @@ function renderPETPE(){
   const head=`<div class="section-head"><div><h2>Laminado PET/PE</h2><div class="sub">Lámina rPET + film PE laminados y refilados · ${rows.length} productos</div></div>
     <div class="sh-spacer"></div>
     <button class="btn" id="ppCalc">🧮 Calculadora</button>
+    ${sub==='precios'?`<button class="btn amber" id="ppArm">🏷️ Armar lista</button>
+    <button class="btn" id="ppPeg">📋 Pegar de Excel</button>`:''}
     <button class="btn" id="ppSave">💾 ${sub==='costos'?'Guardar costo':'Guardar lista'}</button>
     <button class="btn" id="ppHist">🕘 Historial</button>
     <button class="btn" id="ppExport">⬇ Excel ▾</button>
@@ -1908,6 +2283,8 @@ function renderPETPE(){
   wireSub('petpe',renderPETPE);
   $('#ppExport').onclick=openPpExportMenu;
   $('#ppCalc').onclick=openPpCalc;
+  if($('#ppArm')) $('#ppArm').onclick=()=>openArmador('petpe');
+  if($('#ppPeg')) $('#ppPeg').onclick=()=>openPegar('petpe');
   if($('#ppSave')) $('#ppSave').onclick = sub==='costos' ? ppSaveCost : ppListSave;
   if($('#ppHist')) $('#ppHist').onclick = sub==='costos' ? openPpCostHistory : openPpListHistory;
   if($('#ppAdd')) $('#ppAdd').onclick=()=>{ S.petpe.productos.push({cli:'Nuevo',med:'000x000',aPET:400,ePET:250,aPE:420,ePE:50,aFin:380,tiras:1,precio:3.5,ant:3.5}); commit(); renderPETPE(); };
@@ -1930,7 +2307,8 @@ function renderBandejas(){
   const head=`<div class="section-head"><div><h2>Bandejas</h2><div class="sub">Termoformado: ${prods.length} productos · ensaladeras + clamshells</div></div>
     <div class="sh-spacer"></div>
     <button class="btn" id="bCalc">🧮 Calculadora</button>
-    ${sub==='precios'?`<button class="btn" id="bSave">💾 Guardar lista</button>
+    ${sub==='precios'?`<button class="btn amber" id="bArm">🏷️ Armar lista</button>
+    <button class="btn" id="bSave">💾 Guardar lista</button>
     <button class="btn" id="bHist">🕘 Historial</button>`:''}
     <button class="btn" id="bExport">⬇ Excel ▾</button>
   </div>
@@ -2060,6 +2438,7 @@ function renderBandejas(){
   wireSub('bandejas',renderBandejas);
   $('#bExport').onclick=openBaExportMenu;
   $('#bCalc').onclick=openBaCalc;
+  if($('#bArm')) $('#bArm').onclick=()=>openArmador('bandejas');
   if($('#bSave')) $('#bSave').onclick=baListSave;
   if($('#bHist')) $('#bHist').onclick=openBaListHistory;
   if($('#bAdd')) $('#bAdd').onclick=()=>{ S.bandejas.productos.push({cod:'NEW',linea:'Clamshell',mat:'Cristal',bruto:20,neto:16,vel:7000,otros:0.06}); commit(); renderBandejas(); };
@@ -2164,6 +2543,9 @@ function priceSnapshot(){
   const ppRows=S.petpe.productos.map(petpeRow);
   return {
     tc:TC(),
+    params:{ pe:clone(S.pe.params), pet:clone(S.pet.params), petpe:clone(S.petpe.params),
+             bandejas:clone(S.bandejas.params), netPet:clone(S.pet.net), netPp:clone(S.petpe.net),
+             netBa:clone(S.bandejas.net||{}) },
     pet:S.pet.clientes.map(c=>({cli:c.cli,v:c.v,act:c.act})),
     petpe:S.petpe.productos.map(p=>({cli:p.cli,med:p.med,precio:p.precio})),
     bandejas:{ ensaladeras:clone(S.bandejas.ensaladeras), clamshells:clone(S.bandejas.clamshells) },
@@ -3464,7 +3846,7 @@ async function enterApp(){
   }
 }
 // ── NAVEGACIÓN POR VENTANAS (mismo sistema que Sueldos/Horas) ──────
-const MODULOS={dash:'📊 Resumen',pet:'🔵 PET Lámina',pe:'🟡 Film PE',petpe:'🟢 Laminado PET/PE',bandejas:'🟩 Bandejas'};
+const MODULOS={dash:'📊 Resumen',clientes:'👥 Clientes',pet:'🔵 PET Lámina',pe:'🟡 Film PE',petpe:'🟢 Laminado PET/PE',bandejas:'🟩 Bandejas'};
 const _paramTab=(function(){try{return new URLSearchParams(location.search).get('tab');}catch(_){return null;}})();
 const MODULO_VENTANA=(_paramTab&&MODULOS[_paramTab])?_paramTab:null;
 const ES_HIJA=!!MODULO_VENTANA;
@@ -3501,6 +3883,7 @@ function init(){
   inp.addEventListener('keydown',e=>{ if(e.key==='Enter') tryLogin(); });
   inp.focus();
   $$('#tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+  $('#btnUndo').onclick=doUndo; renderUndoBtn();
   $('#btnHistory').onclick=openHistory;
   $('#btnSettings').onclick=openSettings;
   $('#btnLogout').onclick=()=>{ try{sessionStorage.removeItem('winflex-cp-unlocked');}catch(e){} $('#pinInput').value=''; $('#app').style.display='none'; $('#login').style.display='flex'; $('#pinInput').focus(); };

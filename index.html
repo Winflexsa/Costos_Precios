@@ -347,6 +347,7 @@ function semLabel(c){return c==='v'?'Saludable':c==='a'?'Ajustado':'Crítico';}
    ============================================================ */
 const SEED = {
   meta:{ version:1, migr:0, updated:nowISO() },
+  cfg:{ ganEnMargen:false },   // Ganancias FUERA del margen: es reparto del resultado, no costo
   tc:{ value:1420, mode:"auto", lastFetch:null, lastSrc:"manual" },
 
   /* ---------------- FILM PE (insumo interno) ---------------- */
@@ -637,6 +638,12 @@ function migrate(){
     if(!S.petpe.sem) S.petpe.sem={v:0.30,a:0.15};
     m=5; changed=true;
   }
+  if(m < 6){
+    // Ganancias sale del margen: es reparto del resultado, no costo de la operacion
+    if(!S.cfg) S.cfg={};
+    if(S.cfg.ganEnMargen==null) S.cfg.ganEnMargen=false;
+    m=6; changed=true;
+  }
   if(changed){ S.meta.migr=m; scheduleSave(); }
 }
 
@@ -687,6 +694,9 @@ function renderTCBar(){
    CALC ENGINES  (replican las fórmulas de los Excel)
    ============================================================ */
 
+/* Ganancias dentro del margen? Por defecto NO: es reparto del resultado, no costo. */
+function GAN_EN_MARGEN(){ return !!(S && S.cfg && S.cfg.ganEnMargen); }
+
 /* ---- FILM PE ---- */
 function calcPE(){
   const p=S.pe.params, tc=TC();
@@ -732,10 +742,12 @@ function petClientRow(c,variantes){
   const costo=vr.cFlete, precio=c.act;
   const bruta=precio-costo, margenBruto=precio?bruta/precio:0;
   const gastos=precio*(n.admin+n.iibb+n.dyc+n.financiero);
-  const gan=Math.max(0,(precio-costo-gastos)*n.ganancias);
-  const netoUSD=precio-costo-gastos-gan, margenNeto=precio?netoUSD/precio:0;
+  const opUSD=precio-costo-gastos;                       // margen OPERATIVO (antes de Ganancias)
+  const gan=Math.max(0,opUSD*n.ganancias);               // se informa, no se descuenta
+  const netoUSD=opUSD-(GAN_EN_MARGEN()?gan:0), margenNeto=precio?netoUSD/precio:0;
+  const margenOp=precio?opUSD/precio:0;
   const aumento=c.ant?(c.act-c.ant)/c.ant:0;
-  return {...c,activo:c.activo!==false,variante:vr.nom,costo,precio,bruta,margenBruto,gastos,gan,netoUSD,margenNeto,aumento};
+  return {...c,activo:c.activo!==false,variante:vr.nom,costo,precio,bruta,margenBruto,gastos,opUSD,margenOp,gan,netoUSD,margenNeto,aumento};
 }
 
 /* ---- LAMINADO PET/PE ---- */
@@ -763,12 +775,13 @@ function petpeRow(pr){
   const costo=cPET+cPE+cProc, precio=pr.precio;
   const margenBruto=precio?(precio-costo)/precio:0;
   const gastos=precio*(n.admin+n.iibb+n.dyc+n.financiero);
-  const preGan=precio-costo-gastos;
-  const gan=Math.max(0,preGan*n.ganancias);
-  const netoUSD=preGan-gan, margenNeto=precio?netoUSD/precio:0;
+  const preGan=precio-costo-gastos;                      // margen OPERATIVO
+  const gan=Math.max(0,preGan*n.ganancias);              // se informa, no se descuenta
+  const netoUSD=preGan-(GAN_EN_MARGEN()?gan:0), margenNeto=precio?netoUSD/precio:0;
+  const margenOp=precio?preGan/precio:0;
   const aumento=pr.ant?(precio-pr.ant)/pr.ant:0;
   return {...pr,yPET,yPE,gPET,gPE,pPET,pPE,kgPET,kgPE,kgTot,cPET,cPE,cProc,costo,
-    margenBruto,gastos,preGan,gan,netoUSD,margenNeto,aumento};
+    margenBruto,gastos,preGan,margenOp,gan,netoUSD,margenNeto,aumento};
 }
 
 /* ---- BANDEJAS ---- */
@@ -797,10 +810,11 @@ function baMargen(precio,costo){
   const n=S.bandejas.net||{admin:0,iibb:0,dyc:0,financiero:0,ganancias:0};
   const margenBruto=precio?(precio-costo)/precio:0;
   const gastos=precio*(n.admin+n.iibb+n.dyc+n.financiero);
-  const preGan=precio-costo-gastos;
-  const gan=Math.max(0,preGan*n.ganancias);
-  const netoUSD=preGan-gan;
-  return {margenBruto,gastos,preGan,gan,netoUSD,margenNeto:precio?netoUSD/precio:0};
+  const preGan=precio-costo-gastos;                      // margen OPERATIVO
+  const gan=Math.max(0,preGan*n.ganancias);              // se informa, no se descuenta
+  const netoUSD=preGan-(GAN_EN_MARGEN()?gan:0);
+  return {margenBruto,gastos,preGan,margenOp:precio?preGan/precio:0,gan,netoUSD,
+          margenNeto:precio?netoUSD/precio:0};
 }
 function bandejaCostByCod(cod,sinCaja,fmtU){ const pr=S.bandejas.productos.find(x=>x.cod===cod); return pr?bandejaCost(pr,sinCaja,fmtU).usdMillar:0; }
 
@@ -822,17 +836,17 @@ function mergeKey(k,keys){
   return k;
 }
 
-/* ---- inversa del margen: que precio hace falta para un margen neto dado ---- */
+/* ---- inversa del margen: que precio hace falta para un margen operativo dado ---- */
 function precioParaMargen(costo,margen,net){
-  const G=net.admin+net.iibb+net.dyc+net.financiero, g=net.ganancias;
+  const G=net.admin+net.iibb+net.dyc+net.financiero, g=GAN_EN_MARGEN()?net.ganancias:0;
   const den=(1-G)*(1-g)-margen;
   if(den<=0.0001) return null;               // margen inalcanzable con esta estructura
   return costo*(1-g)/den;
 }
-/* ---- precio piso: margen neto = 0 ---- */
+/* ---- precio piso: margen operativo = 0 ---- */
 function precioPiso(costo,net){
   const G=net.admin+net.iibb+net.dyc+net.financiero;
-  return costo/(1-G);
+  return costo/(1-G);   // precio con margen operativo cero
 }
 
 /* ---- estado del precio (antiguedad) ---- */
@@ -932,7 +946,7 @@ function renderClientes(){
   <div class="card">
     <div class="card-h"><h3>Cartera por cliente</h3><span class="tag">ordenado por margen, del peor al mejor</span></div>
     <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-      <th>Cliente</th><th>Líneas</th><th>Ítems</th><th>Margen neto prom.</th><th>Peor ítem</th><th>Últ. mov.</th><th>Estado</th><th></th></tr></thead><tbody>
+      <th>Cliente</th><th>Líneas</th><th>Ítems</th><th>Margen operativo prom.</th><th>Peor ítem</th><th>Últ. mov.</th><th>Estado</th><th></th></tr></thead><tbody>
       ${f.map((r,idx)=>{ const s=semaforo(r.avg); const open=cliExp.has(r.nom);
         return `<tr>
         <td style="text-align:left"><b>${r.nom}</b></td>
@@ -967,10 +981,10 @@ function clienteDetalle(r){
         <td class="num">${usd(i.costo,dec)}</td>
         <td class="num">${usd(i.precio-i.costo,dec)}</td>
         <td class="num"><b>${pct(i.margen,1)}</b></td>
-        <td class="num" title="precio con margen neto cero">${usd(piso,dec)}</td>
+        <td class="num" title="precio con margen operativo cero">${usd(piso,dec)}</td>
         <td><span class="pill ${s}">${semLabel(s)}</span> ${estadoChip(i)}</td></tr>`;}).join('')}
   </tbody></table></div>
-  <div class="note" style="margin-top:6px"><b>Precio piso</b>: el precio al que ese ítem deja de dejar margen neto. Es el número para tener a mano en una negociación.</div>`;
+  <div class="note" style="margin-top:6px"><b>Precio piso</b>: el precio al que ese ítem deja de dejar margen operativo. Es el número para tener a mano en una negociación.</div>`;
 }
 
 /* ============================================================
@@ -1014,7 +1028,7 @@ function armadorCalc(){
     if(a.noBajar && nuevo<r.precio){ nuevo=r.precio; motivo='no se baja'; }
     if(a.redondeo>0) nuevo=Math.round(nuevo/a.redondeo)*a.redondeo;
     const mn=(function(){ const n=r.net,G=n.admin+n.iibb+n.dyc+n.financiero;
-      const g=nuevo*G, pre=nuevo-r.costo-g, gan=Math.max(0,pre*n.ganancias);
+      const g=nuevo*G, pre=nuevo-r.costo-g, gan=GAN_EN_MARGEN()?Math.max(0,pre*n.ganancias):0;
       return nuevo?(pre-gan)/nuevo:0; })();
     return {...r,nuevo,motivo,delta:r.precio?(nuevo-r.precio)/r.precio:0,margenNuevo:mn};
   });
@@ -1028,7 +1042,7 @@ function openArmador(mod){
     <div class="modal-b">
       <div class="note" style="margin-bottom:12px">En vez de aplicar un % parejo, definís el <b>margen que querés</b> y la app calcula el precio que hace falta en cada fila. Nada se aplica hasta que confirmes, y antes de aplicar se guarda una versión automáticamente.</div>
       <div class="params-grid">
-        ${fld('arObj','Margen neto objetivo','%',' ','0.5').replace('value="%"',`value="${armador.objetivo}"`)}
+        ${fld('arObj','Margen operativo objetivo','%',' ','0.5').replace('value="%"',`value="${armador.objetivo}"`)}
         ${fld('arTope','Aumento máximo por fila',armador.topeMax,'%','0.5')}
         ${fld('arUmb','Aplicar solo si está bajo',armador.umbral,'%','0.5')}
         ${fld('arRed','Redondeo',armador.redondeo,'USD','0.01')}
@@ -1226,7 +1240,7 @@ function moduleSummary(){
   const sp=S.pet.sem||{v:.30,a:.15}, spp=S.petpe.sem||{v:.30,a:.15};
   const petD=dist(petC,c=>c.margenNeto,sp.v,sp.a), ppD=dist(ppRows,r=>r.margenNeto,spp.v,spp.a), bD=dist(bRows,r=>r.m,bp.semVerde,bp.semAmarillo);
 
-  // margen neto combinado (PET + Laminado)
+  // margen operativo combinado
   const netoItems=petC.length+ppRows.length+bRows.length;
   const netoAvg=(petC.reduce((a,c)=>a+c.margenNeto,0)+ppRows.reduce((a,r)=>a+r.margenNeto,0)+bRows.reduce((a,r)=>a+r.m,0))/(netoItems||1);
 
@@ -1275,7 +1289,7 @@ function renderDash(){
 
   <div class="grid g4" style="margin-bottom:16px">
     <div class="card stat ${totR>0?'accent':''}" ${totR>0?'style="background:linear-gradient(140deg,#d14343,#a82828);border-color:#a82828"':''}><div class="k">Ítems a revisar</div><div class="v" ${totR===0?`style="color:var(--${riskColor})"`:''}>${riskN}</div><div class="d">de ${totalItems} · 🔴 ${totR} · 🟡 ${totY}</div></div>
-    <div class="card stat"><div class="k">Margen neto prom.</div><div class="v">${pct(d.netoAvg,1)}</div><div class="d">PET + Laminado · ${d.netoItems} ítems</div></div>
+    <div class="card stat"><div class="k">Margen operativo prom.</div><div class="v">${pct(d.netoAvg,1)}</div><div class="d">PET + Laminado · ${d.netoItems} ítems</div></div>
     <div class="card stat"><div class="k">Margen bruto Bandejas</div><div class="v">${pct(d.bAvg,1)}</div><div class="d">${d.bD.n} ítems · sobre precio</div></div>
     <div class="card stat"><div class="k">Ítem más crítico</div><div class="v" style="color:var(--${ws==='v'?'green':ws==='a'?'amber':'red'})">${pct(d.worst.m,1)}</div><div class="d">${d.worst.mod} · ${d.worst.name||'-'}</div></div>
   </div>
@@ -1307,7 +1321,7 @@ function renderDash(){
           <tr><td><span class="chip teal">Laminado PET/PE</span></td><td class="num">${d.ppD.n}</td><td class="num">${pct(d.ppAvg,1)}</td><td class="num">${pct(d.ppMax.margenNeto||0,1)}</td><td class="num">${pct(d.ppMin.margenNeto||0,1)}</td><td class="num">${d.ppD.g}/${d.ppD.y}/${d.ppD.r}</td></tr>
           <tr><td><span class="chip teal">Bandejas</span></td><td class="num">${d.bD.n}</td><td class="num">${pct(d.bAvg,1)}</td><td class="num">${pct(d.bMax.m||0,1)}</td><td class="num">${pct(d.bMin.m||0,1)}</td><td class="num">${d.bD.g}/${d.bD.y}/${d.bD.r}</td></tr>
         </tbody></table></div>
-        <div class="note" style="margin-top:12px">PET y Laminado: <b>margen neto</b> (descuenta gastos comerciales + Ganancias). Bandejas: <b>margen bruto</b> sobre precio (sin gastos comerciales), objetivo ≥ ${pct(S.bandejas.params.semVerde,0)}.</div>
+        <div class="note" style="margin-top:12px">Las tres líneas en la misma base: <b>margen operativo</b> = precio − costo − gastos sobre la venta. Ganancias queda afuera sobre precio (sin gastos comerciales), objetivo ≥ ${pct(S.bandejas.params.semVerde,0)}.</div>
       </div>
     </div>
     <div class="card">
@@ -1523,7 +1537,7 @@ function renderPET(){
     const filtered=(petSearch||petFilter.mat||petFilter.col);
     body=`
     <div class="grid g4" style="margin-bottom:16px">
-      <div class="card stat accent"><div class="k">Margen neto prom.${filtered?' (filtro)':''}</div><div class="v">${pct(avgNeto,1)}</div><div class="d">después de gastos + Ganancias</div></div>
+      <div class="card stat accent"><div class="k">Margen operativo prom.${filtered?' (filtro)':''}</div><div class="v">${pct(avgNeto,1)}</div><div class="d">después de gastos + Ganancias</div></div>
       <div class="card stat"><div class="k">Margen bruto prom.</div><div class="v">${pct(avgBruto,1)}</div><div class="d">precio − costo</div></div>
       <div class="card stat"><div class="k">Precio prom.</div><div class="v">${usd(avgPrecio,2)}<small>/kg</small></div><div class="d">${filtered?filt.length+' de '+rows.length+' clientes':'lista vigente'}</div></div>
       <div class="card stat"><div class="k">Costo prom.</div><div class="v">${usd(avgCosto,2)}<small>/kg</small></div><div class="d">según variante</div></div>
@@ -1542,7 +1556,7 @@ function renderPET(){
           <button class="btn sm primary" id="petAdd">+ Cliente</button>
         </div></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th>Cliente</th><th>Variante</th><th>P. ant.</th><th>P. act.</th><th>Aum.</th><th>Costo</th><th>M.Bruto</th><th>M.Neto USD</th><th>M.Neto%</th><th>Estado</th><th></th></tr></thead><tbody>
+        <th>Cliente</th><th>Variante</th><th>P. ant.</th><th>P. act.</th><th>Aum.</th><th>Costo</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th></tr></thead><tbody>
         ${filt.length?filt.map(r=>{ const s=semaforo(r.margenNeto); const ar=r.aumento;
           return `<tr>
           <td><input class="tinp" style="max-width:130px;text-align:left;font-family:'IBM Plex Sans'" data-path="pet.clientes.${r.i}.cli" value="${r.cli}"></td>
@@ -1563,7 +1577,7 @@ function renderPET(){
       </table></div></div></div>
 
     <div class="card">
-      <div class="card-h"><h3>Parámetros del margen neto</h3><span class="tag">% sobre venta</span></div>
+      <div class="card-h"><h3>Gastos sobre la venta</h3><span class="tag">% sobre venta</span></div>
       <div class="card-b"><div class="params-grid">
         ${field('pet.net.admin',(n.admin*100),'Admin no cargado',{type:'pctnum',unit:'%',sub:'Oficina, contabilidad, sistemas'})}
         ${field('pet.net.iibb',(n.iibb*100),'IIBB s/ventas',{type:'pctnum',unit:'%'})}
@@ -1640,7 +1654,7 @@ function openPetReport(){
         </div>
         <div style="text-align:right"><b>${pct(x.neto,1)}</b> <span class="lnk">${open?'▲':'▼'}</span></div>
       </div>
-      ${open?`<div class="exp-row" style="display:block;padding:8px 6px"><div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Variante</th><th>Precio</th><th>Costo</th><th>M.Neto%</th><th>Estado</th></tr></thead><tbody>
+      ${open?`<div class="exp-row" style="display:block;padding:8px 6px"><div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Variante</th><th>Precio</th><th>Costo</th><th>M.Oper.%</th><th>Estado</th></tr></thead><tbody>
         ${x.rows.slice().sort((p,q)=>p.margenNeto-q.margenNeto).map(r=>{const ss=semaforo(r.margenNeto);
           return `<tr><td style="text-align:left">${r.cli}</td><td style="text-align:left">${r.variante}</td><td class="num">${usd(r.precio,2)}</td><td class="num">${usd(r.costo,2)}</td><td class="num"><b>${pct(r.margenNeto,1)}</b></td><td><span class="pill ${ss}">${semLabel(ss)}</span></td></tr>`;}).join('')}
       </tbody></table></div></div>`:''}`;}).join('');
@@ -1649,7 +1663,7 @@ function openPetReport(){
    <div class="modal-b">
      <div class="gkpi" style="margin-bottom:14px">
        <div class="card stat accent"><div class="card-b stat"><div class="k">Clientes</div><div class="v">${allRows.length}</div><div class="d">${g.length} ${lab.toLowerCase()}s</div></div></div>
-       <div class="card stat"><div class="card-b stat"><div class="k">Margen neto prom.</div><div class="v">${pct(gAvg,1)}</div><div class="d">global</div></div></div>
+       <div class="card stat"><div class="card-b stat"><div class="k">Margen operativo prom.</div><div class="v">${pct(gAvg,1)}</div><div class="d">global</div></div></div>
        <div class="card stat"><div class="card-b stat"><div class="k">Mejor ${lab.toLowerCase()}</div><div class="v" style="font-size:18px">${pct(best.neto,1)}</div><div class="d">${best.grupo}</div></div></div>
        <div class="card stat"><div class="card-b stat"><div class="k">En rojo</div><div class="v">${enRojo}</div><div class="d">margen &lt; 15%</div></div></div>
      </div>
@@ -1659,7 +1673,7 @@ function openPetReport(){
        <button class="btn sm" data-rasc>${petReportAsc?'▲ asc':'▼ desc'}</button>
      </div>
      <div style="margin-bottom:6px">${bars||'<div class="empty">Sin datos.</div>'}</div>
-     <div class="note">Tocá una barra para ver los clientes del grupo. Color = semáforo del margen neto promedio.</div>
+     <div class="note">Tocá una barra para ver los clientes del grupo. Color = semáforo del margen operativo promedio.</div>
    </div>
    <div class="modal-foot"><button class="btn" id="petRepExport">⬇ Exportar informe (Excel)</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`,true);
   $$('#modal [data-rdim]').forEach(b=>b.onclick=()=>{ petReportDim=b.dataset.rdim; petRepExp.clear(); openPetReport(); });
@@ -1672,7 +1686,7 @@ async function exportPetReport(dim,groups){
   const labels={cli:'Cliente',mat:'Material',col:'Color',var:'Variante'};
   const wb=new ExcelJS.Workbook(); const ws=wb.addWorksheet('Informe '+labels[dim]);
   const H=[{t:labels[dim],k:'grupo',w:26},{t:'Ítems',k:'n',w:9,fmt:XF.int},{t:'Precio prom.',k:'precio',w:13,fmt:XF.usd2},
-    {t:'Costo prom.',k:'costo',w:13,fmt:XF.usd2},{t:'Margen neto prom.',k:'neto',w:16,fmt:XF.pct,sem:true},
+    {t:'Costo prom.',k:'costo',w:13,fmt:XF.usd2},{t:'Margen operativo prom.',k:'neto',w:16,fmt:XF.pct,sem:true},
     {t:'Peor',k:'peor',w:11,fmt:XF.pct},{t:'Mejor',k:'mejor',w:11,fmt:XF.pct},{t:'🟢',k:'v',w:6,fmt:XF.int},{t:'🟡',k:'a',w:6,fmt:XF.int},{t:'🔴',k:'r',w:6,fmt:XF.int}];
   groups.forEach(x=>{ x.__sg=0.30; x.__sa=0.15; });
   petTitle(wb,ws,'PET Lámina · Informe por '+labels[dim],H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,groups);
@@ -1761,7 +1775,7 @@ function generatePetListPDF(id){
     const row=[r.cli, nom, usd(r.act,2), ars(r.act*tc)];
     if(isCur){ const cr=petClientRow({cli:r.cli,v:r.v,ant:r.act,act:r.act},vr); row.push(usd(cr.costo,2)); row.push(pct(cr.margenNeto,1)); }
     return row; });
-  const head=isCur ? [['Cliente','Variante','Precio USD/kg','Precio ARS/kg','Costo USD/kg','M.Neto']]
+  const head=isCur ? [['Cliente','Variante','Precio USD/kg','Precio ARS/kg','Costo USD/kg','M.Oper.']]
                    : [['Cliente','Variante','Precio USD/kg','Precio ARS/kg']];
   doc.autoTable({ head, body, startY:84, theme:'grid', styles:{font:'helvetica',fontSize:9,cellPadding:4},
     headStyles:{fillColor:[31,160,85],textColor:255}, alternateRowStyles:{fillColor:[244,251,246]},
@@ -1873,8 +1887,8 @@ async function petSheetNotas(wb){
     {n:'Costo de procesamiento = energía + mano de obra + cono + pallet + stretch + flete + otros + indirectos.'},
     {n:'MP ajustada = MP base ÷ (1 − merma neta). Merma neta = merma de proceso − recuperación.'},
     {n:'Costo final por variante = MP ajustada + costo de procesamiento (con o sin flete).'},
-    {n:`Margen neto = precio − costo − gastos − Ganancias. Gastos sobre venta: Admin ${pct(n.admin,1)}, IIBB ${pct(n.iibb,1)}, DyC ${pct(n.dyc,1)}, Financieros ${pct(n.financiero,1)}. Imp. Ganancias ${pct(n.ganancias,0)}.`},
-    {n:'Semáforo: 🟢 ≥ 30% · 🟡 15–30% · 🔴 < 15% (sobre margen neto).'},
+    {n:`Margen operativo = precio − costo − gastos sobre la venta. Ganancias NO se descuenta: es reparto del resultado, no costo de la operación. Gastos sobre venta: Admin ${pct(n.admin,1)}, IIBB ${pct(n.iibb,1)}, DyC ${pct(n.dyc,1)}, Financieros ${pct(n.financiero,1)}. Imp. Ganancias ${pct(n.ganancias,0)}.`},
+    {n:'Semáforo: 🟢 ≥ 30% · 🟡 15–30% · 🔴 < 15% (sobre margen operativo).'},
     {n:'Generado automáticamente desde la app de Costos & Precios de Winflex.'}
   ];
   petTitle(wb,ws,'PET Lámina · Notas',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
@@ -2217,7 +2231,7 @@ function renderPETPE(){
     const avgBruto=rows.reduce((a,r)=>a+r.margenBruto,0)/(rows.length||1);
     body=`
     <div class="grid g4" style="margin-bottom:16px">
-      <div class="card stat accent"><div class="k">Margen neto prom.</div><div class="v">${pct(avgNeto,1)}</div><div class="d">${rows.length} productos</div></div>
+      <div class="card stat accent"><div class="k">Margen operativo prom.</div><div class="v">${pct(avgNeto,1)}</div><div class="d">${rows.length} productos</div></div>
       <div class="card stat"><div class="k">Margen bruto prom.</div><div class="v">${pct(avgBruto,1)}</div><div class="d">precio − costo</div></div>
       <div class="card stat"><div class="k">Precio prom.</div><div class="v">${usd(rows.reduce((a,r)=>a+r.precio,0)/(rows.length||1),2)}<small>/kg</small></div><div class="d">lista vigente</div></div>
       <div class="card stat"><div class="k">Costo prom.</div><div class="v">${usd(rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1),2)}<small>/kg</small></div></div>
@@ -2226,7 +2240,7 @@ function renderPETPE(){
     <div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>Precios por producto / cliente</h3><button class="btn sm primary" id="ppAdd" style="margin-left:auto">+ Producto</button></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th>Cliente</th><th>Medida</th><th>Costo</th><th>P. ant.</th><th>Precio</th><th>Aum.</th><th>M.Bruto</th><th>M.Neto USD</th><th>M.Neto%</th><th>Estado</th><th></th><th></th></tr></thead><tbody>
+        <th>Cliente</th><th>Medida</th><th>Costo</th><th>P. ant.</th><th>Precio</th><th>Aum.</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th><th></th></tr></thead><tbody>
         ${rows.map(r=>{ const s=semaforo(r.margenNeto); const open=ppMExp.has(r.i);
           return `<tr>
           <td style="text-align:left">${r.cli}</td>
@@ -2250,10 +2264,10 @@ function renderPETPE(){
         <td></td>
         <td class="num">${pct(avgBruto,1)}</td><td></td><td class="num">${pct(avgNeto,1)}</td><td></td><td></td><td></td></tr>
       </table></div>
-      <div class="note" style="margin-top:8px">Tocá “desglose” en cualquier fila para ver, paso a paso, cómo se llega al margen neto. Los anchos, espesores y tiras se editan en la solapa Costos.</div></div></div>
+      <div class="note" style="margin-top:8px">Tocá “desglose” en cualquier fila para ver, paso a paso, cómo se llega al margen operativo. Los anchos, espesores y tiras se editan en la solapa Costos.</div></div></div>
 
     <div class="card" style="margin-bottom:16px">
-      <div class="card-h"><h3>Ranking por margen neto</h3><span class="tag">de mayor a menor</span></div>
+      <div class="card-h"><h3>Ranking por margen operativo</h3><span class="tag">de mayor a menor</span></div>
       <div class="card-b">
         <div class="grid g4" style="margin-bottom:12px">
           ${(()=>{ const sr=[...rows].sort((a,b)=>b.margenNeto-a.margenNeto); const best=sr[0]||{cli:'—',med:'',margenNeto:0}, worst=sr[sr.length-1]||{cli:'—',med:'',margenNeto:0}; const avgAum=rows.reduce((a,r)=>a+(r.aumento||0),0)/(rows.length||1);
@@ -2262,14 +2276,14 @@ function renderPETPE(){
             <div class="card stat"><div class="k">Aumento prom.</div><div class="v">${pct(avgAum,1)}</div><div class="d">vs precio anterior</div></div>
             <div class="card stat"><div class="k">En rojo</div><div class="v">${rows.filter(r=>r.margenNeto<0.15).length}</div><div class="d">margen &lt; 15%</div></div>`;})()}
         </div>
-        <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Cliente</th><th>Medida</th><th>M.Neto%</th><th>Aum.</th><th>Estado</th></tr></thead><tbody>
+        <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Cliente</th><th>Medida</th><th>M.Oper.%</th><th>Aum.</th><th>Estado</th></tr></thead><tbody>
         ${[...rows].sort((a,b)=>b.margenNeto-a.margenNeto).map((r,idx)=>{ const s=semaforo(r.margenNeto);
           return `<tr><td class="num">${idx+1}</td><td style="text-align:left">${r.cli}</td><td class="num" style="text-align:left">${r.med}</td><td class="num"><b>${pct(r.margenNeto,1)}</b></td><td class="num">${r.aumento?pct(r.aumento,1):'—'}</td><td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td></tr>`;}).join('')}
         </tbody></table></div>
       </div></div>
 
     <div class="card">
-      <div class="card-h"><h3>Parámetros del margen neto</h3><span class="tag">% sobre venta</span></div>
+      <div class="card-h"><h3>Gastos sobre la venta</h3><span class="tag">% sobre venta</span></div>
       <div class="card-b"><div class="params-grid">
         ${field('petpe.net.admin',(n.admin*100),'Admin',{type:'pctnum',unit:'%'})}
         ${field('petpe.net.iibb',(n.iibb*100),'IIBB',{type:'pctnum',unit:'%'})}
@@ -2369,13 +2383,13 @@ function renderBandejas(){
       <div class="note" style="margin-top:8px">Caja: promedio de la cotización Kraft Liner del 19/03/2026 (E900 $1.085,14 · T900 $620,82). Las unidades por caja y por pallet se cargan por producto arriba. <b>Clamshells:</b> 15.500 u/pallet (F40/F41/F43) y 10.000 u/pallet (F50/F61/F63). <b>Ensaladeras:</b> E900/E910 300·500·440·100 u/caja · T900 300·1.000·100 u/caja. <b>S900 falta confirmar.</b> Los clientes marcados “s/caja” ponen ellos la caja y ese costo no se les carga.</div></div></div>
 
     <div class="card" style="margin-top:16px">
-      <div class="card-h"><h3>Gastos sobre la venta</h3><span class="tag">para llegar al margen neto</span></div>
+      <div class="card-h"><h3>Gastos sobre la venta</h3><span class="tag">para llegar al margen operativo</span></div>
       <div class="card-b"><div class="params-grid">
         ${field('bandejas.net.admin',(S.bandejas.net.admin*100),'Administración',{type:'pctnum',unit:'%'})}
         ${field('bandejas.net.iibb',(S.bandejas.net.iibb*100),'IIBB',{type:'pctnum',unit:'%'})}
         ${field('bandejas.net.dyc',(S.bandejas.net.dyc*100),'Desc. y comisiones',{type:'pctnum',unit:'%'})}
         ${field('bandejas.net.financiero',(S.bandejas.net.financiero*100),'Financiero',{type:'pctnum',unit:'%'})}
-        ${field('bandejas.net.ganancias',(S.bandejas.net.ganancias*100),'Ganancias',{type:'pctnum',unit:'%'})}
+        ${field('bandejas.net.ganancias',(S.bandejas.net.ganancias*100),'Ganancias',{type:'pctnum',unit:'%',sub:'informativo: no se descuenta'})}
       </div></div></div>`;
   } else {
     const ensCods=S.bandejas.productos.filter(x=>x.linea==='Ensaladera').map(x=>x.cod);
@@ -2390,8 +2404,8 @@ function renderBandejas(){
     const clamAvg=clamRows.reduce((a,r)=>a+r.m,0)/(clamRows.length||1);
     body=`
     <div class="grid g4" style="margin-bottom:16px">
-      <div class="card stat accent"><div class="k">Margen neto ensaladeras</div><div class="v">${pct(ensAvg,1)}</div><div class="d">misma base que PET y Laminado</div></div>
-      <div class="card stat"><div class="k">Margen neto clamshells</div><div class="v">${pct(clamAvg,1)}</div><div class="d">lista única blueberry</div></div>
+      <div class="card stat accent"><div class="k">Margen operativo ensaladeras</div><div class="v">${pct(ensAvg,1)}</div><div class="d">misma base que PET y Laminado</div></div>
+      <div class="card stat"><div class="k">Margen operativo clamshells</div><div class="v">${pct(clamAvg,1)}</div><div class="d">lista única blueberry</div></div>
       <div class="card stat"><div class="k">Umbral verde</div><div class="v">${pct(p.semVerde,0)}</div><div class="d">amarillo ≥ ${pct(p.semAmarillo,0)}</div></div>
       <div class="card stat"><div class="k">Cartera blueberry</div><div class="v">${S.bandejas.blueberry.length}</div><div class="d">clientes lista clamshell</div></div>
     </div>
@@ -3044,7 +3058,7 @@ async function exportPETPE(){
    ============================================================ */
 let petpeProcExp=new Set(), ppCalc=null, ppMExp=new Set();
 
-/* desglose paso a paso del margen neto */
+/* desglose paso a paso del margen operativo */
 function ppMarginDetail(r,n){
   const gastosPct=n.admin+n.iibb+n.dyc+n.financiero;
   return `<div class="tbl-wrap" style="max-width:560px"><table><tbody>
@@ -3053,8 +3067,8 @@ function ppMarginDetail(r,n){
     <tr class="total"><td style="text-align:left">= Margen bruto</td><td class="num"><b>${usd(r.precio-r.costo,3)}</b></td><td class="num">${pct(r.margenBruto,1)}</td></tr>
     <tr><td style="text-align:left">− Gastos comerciales<span class="formula">admin ${pct(n.admin,1)} + IIBB ${pct(n.iibb,1)} + DyC ${pct(n.dyc,1)} + financ. ${pct(n.financiero,1)} = ${pct(gastosPct,1)} sobre precio</span></td><td class="num">−${usd(r.gastos,3)}</td><td></td></tr>
     <tr><td style="text-align:left">− Impuesto a las ganancias<span class="formula">${pct(n.ganancias,0)} sobre (precio − costo − gastos)</span></td><td class="num">−${usd(r.gan,3)}</td><td></td></tr>
-    <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= Margen neto</td><td class="num"><b>${usd(r.netoUSD,3)}</b></td><td class="num"><b>${pct(r.margenNeto,1)}</b></td></tr>
-    <tr><td style="text-align:left" class="formula" colspan="3">Margen neto % = margen neto USD ${usd(r.netoUSD,3)} ÷ precio ${usd(r.precio,2)} = ${pct(r.margenNeto,1)}</td></tr>
+    <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= Margen operativo</td><td class="num"><b>${usd(r.netoUSD,3)}</b></td><td class="num"><b>${pct(r.margenNeto,1)}</b></td></tr>
+    <tr><td style="text-align:left" class="formula" colspan="3">Margen operativo % = margen operativo USD ${usd(r.netoUSD,3)} ÷ precio ${usd(r.precio,2)} = ${pct(r.margenNeto,1)}</td></tr>
   </tbody></table></div>`;
 }
 
@@ -3087,7 +3101,7 @@ async function ppSheetMargenParams(wb){
   const H=[{t:'Parámetro',k:'par',w:30},{t:'Valor',k:'val',w:14,fmt:XF.pct}];
   const rows=[{par:'Admin',val:n.admin},{par:'IIBB',val:n.iibb},{par:'DyC + otros',val:n.dyc},
     {par:'Financieros',val:n.financiero},{par:'Impuesto a las ganancias',val:n.ganancias}];
-  petTitle(wb,ws,'Laminado PET/PE · Parámetros del margen neto',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
+  petTitle(wb,ws,'Laminado PET/PE · Gastos sobre la venta',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
 }
 
 /* ---------------- Historial de listas de precios PET/PE ---------------- */
@@ -3157,7 +3171,7 @@ function generatePpListPDF(id){
   doc.autoTable({ startY:84, theme:'grid', styles:{font:'helvetica',fontSize:9,cellPadding:4},
     headStyles:{fillColor:[31,160,85],textColor:255}, alternateRowStyles:{fillColor:[244,251,246]},
     columnStyles:{0:{halign:'left'},1:{halign:'left'}}, margin:{left:36,right:36},
-    head:[['Cliente','Medida','Costo USD/kg','Precio USD/kg','M.Bruto','M.Neto%']],
+    head:[['Cliente','Medida','Costo USD/kg','Precio USD/kg','M.Bruto','M.Oper.%']],
     body:h.products.map(pr=>[pr.cli,pr.med,usd(pr.costo,3),usd(pr.precio,2),pct(pr.margenBruto,1),pct(pr.margenNeto,1)]) });
   doc.setFontSize(8); doc.setTextColor(120);
   doc.text('Winflex S.A. · Envases especiales · Laminado PET/PE', 36, doc.internal.pageSize.getHeight()-24);
@@ -3238,7 +3252,7 @@ function ppCalcResultHTML(){
   <div class="gauto" style="margin-bottom:14px">
     <div class="card stat accent"><div class="card-b stat"><div class="k">Costo unitario</div><div class="v">${usd(r.costo,3)}<small>/kg</small></div><div class="d">${ars(r.arsU)}/kg</div></div></div>
     <div class="card stat"><div class="card-b stat"><div class="k">Total ${nf(c.qty)} kg</div><div class="v">${usd(r.totalUSD,2)}</div><div class="d">${ars(r.totalARS)}</div></div></div>
-    ${c.precio?`<div class="card stat"><div class="card-b stat"><div class="k">Margen neto</div><div class="v" style="color:var(--${s==='v'?'green':s==='a'?'amber':'red'})">${pct(r.margenNeto,1)}</div><div class="d">precio ${usd(c.precio,2)} · bruto ${pct(r.margenBruto,1)}</div></div></div>`:''}
+    ${c.precio?`<div class="card stat"><div class="card-b stat"><div class="k">Margen operativo</div><div class="v" style="color:var(--${s==='v'?'green':s==='a'?'amber':'red'})">${pct(r.margenNeto,1)}</div><div class="d">precio ${usd(c.precio,2)} · bruto ${pct(r.margenBruto,1)}</div></div></div>`:''}
   </div>
   <div class="card"><div class="card-b">${bar}
     <div class="tbl-wrap" style="margin-top:12px"><table><tbody>
@@ -3303,7 +3317,7 @@ async function exportPpCalc(){
     {k:'Cantidad',v:c.qty,d:'kg · TC '+ars(c.tc)},
     {k:'TOTAL',v:r.totalUSD,d:'USD · '+ars(r.totalARS)}
   ];
-  if(c.precio) rows.push({k:'Precio / Margen neto',v:c.precio,d:'margen neto '+pct(r.margenNeto,1)+' · bruto '+pct(r.margenBruto,1)});
+  if(c.precio) rows.push({k:'Precio / Margen operativo',v:c.precio,d:'margen operativo '+pct(r.margenNeto,1)+' · bruto '+pct(r.margenBruto,1)});
   dataRows(ws,5,H,rows);
   await download(wb,'Winflex_LaminadoPETPE_calculo.xlsx');
 }
@@ -3391,7 +3405,7 @@ function generatePpCostPDF(id){
   doc.text(`Insumo lámina rPET: ${usd(h.cPET,2)}/kg   ·   Insumo film PE: ${usd(h.cPE,2)}/kg`, 36, doc.lastAutoTable.finalY+16);
   doc.autoTable({ startY:doc.lastAutoTable.finalY+26, theme:'grid', styles:{font:'helvetica',fontSize:8.5,cellPadding:3.5},
     headStyles:{fillColor:[31,160,85],textColor:255}, columnStyles:{0:{halign:'left'},1:{halign:'left'}}, margin:{left:36,right:36},
-    head:[['Cliente','Medida','Costo USD/kg','Precio USD/kg','M.Neto']],
+    head:[['Cliente','Medida','Costo USD/kg','Precio USD/kg','M.Oper.']],
     body:h.products.map(pr=>[pr.cli,pr.med,usd(pr.costo,3),usd(pr.precio,2),pct(pr.margenNeto,1)]),
     alternateRowStyles:{fillColor:[244,251,246]} });
   doc.setFontSize(8); doc.setTextColor(120);
@@ -3450,8 +3464,8 @@ async function ppSheetPrecios(wb){
     {t:'M.Bruto',k:'margenBruto',w:10,fmt:XF.pct,f:R=>`IF(D${R}=0,0,(D${R}-C${R})/D${R})`},
     {t:'Gastos %',k:'gPct',w:10,fmt:XF.pct},{t:'Gastos USD',k:'gastos',w:11,fmt:XF.usd3,f:R=>`D${R}*F${R}`},
     {t:'Gan. %',k:'ganPct',w:9,fmt:XF.pct},{t:'Gan. USD',k:'gan',w:11,fmt:XF.usd3,f:R=>`MAX(0,(D${R}-C${R}-G${R})*H${R})`},
-    {t:'M.Neto USD',k:'netoUSD',w:12,fmt:XF.usd3,f:R=>`D${R}-C${R}-G${R}-I${R}`},
-    {t:'M.Neto %',k:'margenNeto',w:11,fmt:XF.pct,sem:true,f:R=>`IF(D${R}=0,0,J${R}/D${R})`},
+    {t:'M.Oper. USD',k:'netoUSD',w:12,fmt:XF.usd3,f:R=>`D${R}-C${R}-G${R}-I${R}`},
+    {t:'M.Oper. %',k:'margenNeto',w:11,fmt:XF.pct,sem:true,f:R=>`IF(D${R}=0,0,J${R}/D${R})`},
     {t:'P. ant.',k:'ant',w:11,fmt:XF.usd2},
     {t:'Aum.',k:'aumento',w:9,fmt:XF.pct,f:R=>`IF(L${R}=0,0,(D${R}-L${R})/L${R})`}];
   petTitle(wb,ws,'Laminado PET/PE · Precios y márgenes (con fórmulas)',H.length); setCols(ws,H); headerRow(ws,4,H);
@@ -3467,7 +3481,7 @@ async function ppSheetNotas(wb){
     {n:'Costo = kg PET × costo rPET + kg PE × costo PE + kg totales × costo de proceso.'},
     {n:'El costo de proceso (laminado + refilado) se aplica sobre los kg brutos que entran a la línea.'},
     {n:'Costo de proceso = adhesivos + MO laminado + energía laminado + MO refilado + energía refilado + otros refilado.'},
-    {n:'Margen neto = (precio − costo − gastos comerciales − impuesto a las ganancias) ÷ precio.'},
+    {n:'Margen operativo = (precio − costo − gastos sobre la venta) ÷ precio. Ganancias se informa aparte, no se descuenta.'},
     {n:'Los costos de rPET y PE pueden vincularse a los módulos PET Lámina y Film PE respectivamente.'},
     {n:'Generado automáticamente desde la app de Costos & Precios de Winflex.'}
   ];

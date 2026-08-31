@@ -345,7 +345,8 @@ const pct=(v,d=1)=>((v||0)*100).toLocaleString('es-AR',{minimumFractionDigits:d,
 const today=()=>new Date().toLocaleDateString('es-AR');
 const nowISO=()=>new Date().toISOString();
 function toast(msg,type=''){const t=$('#toast');t.textContent=msg;t.className='toast show '+type;setTimeout(()=>t.className='toast',2200);}
-function semaforo(margin,green=0.30,yellow=0.15){return margin>=green?'v':margin>=yellow?'a':'r';}
+function semaforo(margin,green,yellow){const _s=(typeof S!=='undefined'&&S&&S.sem)?S.sem:{v:0.45,a:0.25};
+  return margin>=(green!=null?green:_s.v)?'v':margin>=(yellow!=null?yellow:_s.a)?'a':'r';}
 function semLabel(c){return c==='v'?'Saludable':c==='a'?'Ajustado':'Crítico';}
 
 /* ============================================================
@@ -354,7 +355,10 @@ function semLabel(c){return c==='v'?'Saludable':c==='a'?'Ajustado':'Crítico';}
 const SEED = {
   meta:{ version:1, migr:0, updated:nowISO() },
   cfg:{ ganEnMargen:false, verInactivos:false },   // Ganancias FUERA del margen: es reparto del resultado, no costo
-  tc:{ value:1420, mode:"auto", lastFetch:null, lastSrc:"manual" },
+  tc:{ value:1420, mode:"auto", lastFetch:null, lastSrc:"manual", lista:null, listaD:null, usarLista:false },
+  /* una sola estructura de gastos y un solo semaforo para las tres lineas */
+  net:{ admin:0.02, iibb:0.035, dyc:0.015, financiero:0.03, ganancias:0.35 },
+  sem:{ v:0.45, a:0.25 },
 
   /* ---------------- FILM PE (insumo interno) ---------------- */
   pe:{
@@ -459,7 +463,7 @@ const SEED = {
     productos:[
       {cli:"Cadrinorte",med:"520x400",aPET:550,ePET:350,aPE:570,ePE:50,aFin:520,tiras:1,precio:4.09,ant:3.78},
       {cli:"Dantelli",med:"357x350",aPET:380,ePET:300,aPE:400,ePE:50,aFin:357,tiras:1,precio:3.69,ant:3.69},
-      {cli:"Dantelli NEGRO",med:"357x350",aPET:380,ePET:300,aPE:400,ePE:50,aFin:357,tiras:1,precio:3.87,ant:3.87},
+      {cli:"Dantelli NEGRO",med:"357x350",v:2,aPET:380,ePET:300,aPE:400,ePE:50,aFin:357,tiras:1,precio:3.87,ant:3.87},
       {cli:"Dantelli",med:"323x350",aPET:350,ePET:300,aPE:370,ePE:50,aFin:323,tiras:1,precio:3.69,ant:3.69},
       {cli:"Don Yeyo",med:"321x300",aPET:350,ePET:250,aPE:370,ePE:50,aFin:321,tiras:1,precio:3.38,ant:3.38},
       {cli:"El Artesano",med:"422x250",aPET:450,ePET:200,aPE:470,ePE:50,aFin:422,tiras:1,precio:3.67,ant:3.67},
@@ -483,7 +487,7 @@ const SEED = {
 
   /* ---------------- BANDEJAS (termoformado) ---------------- */
   bandejas:{
-    params:{ mpCristal:1.60, mpNegro:1.76, recuperacion:0.90,
+    params:{ linkPET:true, mpCristal:1.60, mpNegro:1.76, recuperacion:0.90,
       salario:8000, operarios:3, cargas:1.5, energia:0.05,
       cajaARS:853, palletARS:6800, stretchARS:0, fletePallet:0, pctFlete:0,
       semVerde:0.30, semAmarillo:0.15 },
@@ -684,6 +688,30 @@ function migrate(){
     if(S.cfg.verInactivos==null) S.cfg.verInactivos=false;
     m=8; changed=true;
   }
+  if(m < 9){
+    // el laminado se costeaba SIEMPRE con PET cristal, aunque el producto fuera de color
+    S.petpe.productos.forEach(p=>{
+      if(p.v!=null) return;
+      p.v = /negro|black/i.test(p.cli+' '+p.med) ? 2
+          : /blanco|white/i.test(p.cli+' '+p.med) ? 1
+          : /azul/i.test(p.cli+' '+p.med) ? 3 : 0;
+    });
+    m=9; changed=true;
+  }
+  if(m < 10){
+    // una sola estructura de gastos y un solo semaforo
+    S.net = S.net || (S.pet && S.pet.net) || {admin:.02,iibb:.035,dyc:.015,financiero:.03,ganancias:.35};
+    // umbrales recalibrados: al sacar Ganancias el margen subio ~1/0,65
+    S.sem = S.sem || {v:0.45,a:0.25};
+    delete S.pet.net; delete S.petpe.net; delete S.bandejas.net;
+    delete S.pet.sem; delete S.petpe.sem;
+    if(S.bandejas.params){ delete S.bandejas.params.semVerde; delete S.bandejas.params.semAmarillo; }
+    // lamina propia en termoformado, valuada como en laminado
+    if(S.bandejas.params.linkPET==null) S.bandejas.params.linkPET=true;
+    S.bandejas.productos.forEach(pr=>{ if(pr.v==null) pr.v = pr.mat==='Negro'?2:0; });
+    if(S.tc.usarLista==null) S.tc.usarLista=false;
+    m=10; changed=true;
+  }
   if(changed){ S.meta.migr=m; scheduleSave(); }
 }
 
@@ -719,15 +747,45 @@ async function fetchTC(){
   }catch(e){ console.warn('dolarapi fail',e); }
   return null;
 }
-function TC(){ return num(S.tc.value)||1; }
+function TC(){ return (S.tc.usarLista && num(S.tc.lista)) ? num(S.tc.lista) : (num(S.tc.value)||1); }
 async function refreshTC(manual){
   const v=await fetchTC();
   if(v){ if(manual) S.tc.mode='auto'; renderTCBar(); renderAll(); commit(); toast('Dólar BNA: '+ars(v),'ok'); }
   else toast('No se pudo traer el dólar','err');
 }
 function renderTCBar(){
-  $('#tcInput').value = Math.round(TC());
-  $('#tcSrc').textContent = S.tc.mode==='auto' ? (S.tc.lastSrc||'BNA') : 'manual';
+  $('#tcInput').value = Math.round(TCD());
+  const dif = (S.tc.lista&&TCD()) ? (TCD()/S.tc.lista-1) : 0;
+  $('#tcSrc').innerHTML = (S.tc.mode==='auto' ? (S.tc.lastSrc||'BNA') : 'manual')
+    + (S.tc.usarLista&&S.tc.lista
+        ? ` \u00b7 <b title="los m\u00e1rgenes se calculan con este TC">lista ${ars(S.tc.lista)}</b>`
+          + (Math.abs(dif)>0.05?` <span class="pill ${Math.abs(dif)>0.15?'r':'a'}" title="el d\u00f3lar se movi\u00f3 respecto del TC de lista">${dif>0?'+':''}${pct(dif,0)}</span>`:'')
+        : ' \u00b7 <span class="lnk" id="tcFijar">fijar TC de lista</span>');
+  const fj=$('#tcFijar'); if(fj) fj.onclick=openTCLista;
+}
+function openTCLista(){
+  openModal(`
+    <div class="modal-h"><h3>\ud83d\udccc TC de lista</h3><button class="x" onclick="closeModal()">\u2715</button></div>
+    <div class="modal-b">
+      <div class="note" style="margin-bottom:12px">Los precios en pesos convertidos al d\u00f3lar del d\u00eda hacen que el margen se mueva solo, sin que cambie nada real del negocio.
+      Fijando un <b>TC de lista</b>, todos los costos y m\u00e1rgenes se calculan siempre con ese valor. El d\u00f3lar del d\u00eda se sigue mostrando arriba como referencia.</div>
+      <div class="params-grid">
+        <div class="field"><label>TC de lista<small>ARS por USD</small></label><div class="iw"><input type="number" id="tclV" value="${S.tc.lista||Math.round(TCD())}"></div></div>
+        <div class="field"><label>D\u00f3lar de hoy<small>solo referencia</small></label><div class="iw"><input type="number" value="${Math.round(TCD())}" disabled></div></div>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px">
+        <input type="checkbox" id="tclOn" ${S.tc.usarLista?'checked':''}> Usar el TC de lista para calcular costos y m\u00e1rgenes</label>
+      ${S.tc.listaD?`<div class="note" style="margin-top:10px">Fijado el ${fmtFecha(S.tc.listaD)}.</div>`:''}
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn amber" id="tclOk">Guardar</button></div>`);
+  $('#tclOk').onclick=()=>{
+    const v=num($('#tclV').value);
+    if(v>0){ if(S.tc.lista!==v) S.tc.listaD=hoyISO(); S.tc.lista=v; }
+    S.tc.usarLista=$('#tclOn').checked;
+    commit(); closeModal(); renderAll();
+    toast(S.tc.usarLista?`Margenes calculados a TC ${ars(v)}`:'TC de lista desactivado','ok');
+  };
 }
 
 /* ============================================================
@@ -778,7 +836,7 @@ function petVariantes(){
 }
 function petClientRow(c,variantes){
   // c.activo===false -> cliente que dejo de comprar; se muestra pero no entra en promedios
-  const n=S.pet.net, vr=variantes[c.v]||variantes[0];
+  const n=NET(), vr=variantes[c.v]||variantes[0];
   const costo=vr.cFlete, precio=c.act;
   const bruta=precio-costo, margenBruto=precio?bruta/precio:0;
   const gastos=precio*(n.admin+n.iibb+n.dyc+n.financiero);
@@ -802,11 +860,16 @@ function petpeProc(){
   const subRef=MOref+enerRef+p.otrosRef;
   return {adhes,MOlam,enerLam,subLam,MOref,enerRef,otrosRef:p.otrosRef,subRef,procKg:subLam+subRef};
 }
-function petpeCostPET(){ const p=S.petpe.params; if(p.linkPET){ const v=petVariantes()[0]; return v.cFlete; } return p.costoLaminaPET; }
+/* La lamina que consumen Laminado y Termoformado es la NUESTRA: se valua al costo
+   de produccion de la variante, SIN el flete de entrega a cliente. */
+function petpeCostPET(vIdx){ const p=S.petpe.params;
+  if(p.linkPET){ const vs=petVariantes(); const v=vs[vIdx!=null?vIdx:0]||vs[0]; return v.sFlete; }
+  return p.costoLaminaPET; }
 function petpeCostPE(){ const p=S.petpe.params; if(p.linkPE){ return calcPE().total; } return p.costoLaminaPE; }
 function petpeRow(pr){
-  const p=S.petpe.params, n=S.petpe.net, proc=petpeProc(), tc=TC();
-  const cPETkg=petpeCostPET(), cPEkg=petpeCostPE();
+  const p=S.petpe.params, n=NET(), proc=petpeProc(), tc=TC();
+  const cPETkg=petpeCostPET(pr.v), cPEkg=petpeCostPE();
+  const vPET=(petVariantes()[pr.v!=null?pr.v:0]||petVariantes()[0]).nom;
   const yPET=(pr.aFin*pr.tiras)/pr.aPET, yPE=(pr.aFin*pr.tiras)/pr.aPE;
   const gPET=pr.ePET*p.densPET, gPE=pr.ePE*p.densPE, gTot=gPET+gPE;
   const pPET=gPET/gTot, pPE=gPE/gTot;
@@ -820,11 +883,23 @@ function petpeRow(pr){
   const netoUSD=preGan-(GAN_EN_MARGEN()?gan:0), margenNeto=precio?netoUSD/precio:0;
   const margenOp=precio?preGan/precio:0;
   const aumento=pr.ant?(precio-pr.ant)/pr.ant:0;
-  return {...pr,yPET,yPE,gPET,gPE,pPET,pPE,kgPET,kgPE,kgTot,cPET,cPE,cProc,costo,
+  return {...pr,vPET,cPETkg,yPET,yPE,gPET,gPE,pPET,pPE,kgPET,kgPE,kgTot,cPET,cPE,cProc,costo,
     margenBruto,gastos,preGan,margenOp,gan,netoUSD,margenNeto,aumento};
 }
 
 /* ---- BANDEJAS ---- */
+/* la lamina que entra a la termoformadora es propia: se valua igual que en laminado */
+function baPrecioLamina(prod){
+  const p=S.bandejas.params;
+  if(p.linkPET!==false){ const vs=petVariantes();
+    return (vs[prod.v!=null?prod.v:(prod.mat==='Negro'?2:0)]||vs[0]).sFlete; }
+  return prod.mat==='Negro'?p.mpNegro:p.mpCristal;
+}
+function baVarNom(prod){
+  if(S.bandejas.params.linkPET===false) return prod.mat;
+  const vs=petVariantes();
+  return (vs[prod.v!=null?prod.v:(prod.mat==='Negro'?2:0)]||vs[0]).nom;
+}
 function baFormato(prod,fmtU){
   const F=(prod.formatos&&prod.formatos.length)?prod.formatos:[{u:prod.uCaja||1,up:prod.uPallet||1}];
   return (fmtU!=null && F.find(x=>+x.u===+fmtU)) || F[0];
@@ -834,7 +909,7 @@ function bandejaCost(prod,sinCaja,fmtU){
   const MOh=p.salario*p.operarios*p.cargas;          // cargas = MULTIPLICADOR (igual que PE/PET/Laminado)
   const desp=prod.bruto-prod.neto;
   const mpUtil=(prod.neto+desp*(1-p.recuperacion))/1000;
-  const precioMP=prod.mat==='Negro'?p.mpNegro:p.mpCristal;
+  const precioMP=baPrecioLamina(prod);
   const cMP=mpUtil*precioMP, cMO=(MOh/prod.vel)/tc, cEner=mpUtil*p.energia, cOtros=mpUtil*prod.otros;
   // --- empaque: formato de caja + quien la pone (depende del CANAL) ---
   const F=baFormato(prod,fmtU), uCaja=F.u||1, uPall=F.up||1;
@@ -847,7 +922,7 @@ function bandejaCost(prod,sinCaja,fmtU){
 }
 /* margen de bandejas en la MISMA base que PET y Laminado */
 function baMargen(precio,costo){
-  const n=S.bandejas.net||{admin:0,iibb:0,dyc:0,financiero:0,ganancias:0};
+  const n=NET()||{admin:0,iibb:0,dyc:0,financiero:0,ganancias:0};
   const margenBruto=precio?(precio-costo)/precio:0;
   const gastos=precio*(n.admin+n.iibb+n.dyc+n.financiero);
   const preGan=precio-costo-gastos;                      // margen OPERATIVO
@@ -1043,7 +1118,7 @@ function renderClientes(){
 }
 
 function clienteDetalle(r){
-  const net=S.pet.net;
+  const net=NET();
   return `<div class="tbl-wrap"><table><thead><tr>
     <th>Línea</th><th>Producto</th><th>Precio</th><th>Costo</th><th>Margen $</th><th>Margen %</th><th>Precio piso</th><th>Estado</th></tr></thead><tbody>
     ${r.items.map(i=>{ const s=semaforo(i.margen); const piso=precioPiso(i.costo,net);
@@ -1068,21 +1143,21 @@ function listaFilas(mod){
   if(mod==='pet'){ const vr=petVariantes();
     return S.pet.clientes.map((c,i)=>{ const r=petClientRow(c,vr);
       return {i,nom:c.cli,det:r.variante,precio:r.precio,costo:r.costo,margen:r.margenNeto,
-        activo:c.activo!==false,dec:3,net:S.pet.net,set:v=>priceCommit(S.pet.clientes[i],'act',v)}; }); }
+        activo:c.activo!==false,dec:3,net:NET(),set:v=>priceCommit(S.pet.clientes[i],'act',v)}; }); }
   if(mod==='petpe'){
     return S.petpe.productos.map((p,i)=>{ const r=petpeRow(p);
       return {i,nom:p.cli,det:p.med,precio:r.precio,costo:r.costo,margen:r.margenNeto,
-        activo:esActivo(p),dec:3,net:S.petpe.net,set:v=>priceCommit(S.petpe.productos[i],'precio',v)}; }); }
+        activo:esActivo(p),dec:3,net:NET(),set:v=>priceCommit(S.petpe.productos[i],'precio',v)}; }); }
   if(mod==='bandejas'){ const out=[];
     S.bandejas.ensaladeras.forEach((e,ei)=>{ Object.keys(e.p).forEach(cod=>{
       const precio=e.mon==='USD'?e.p[cod]:e.p[cod]/TC(), costo=bandejaCostByCod(cod,e.cajaCli,e.fmt);
       out.push({i:ei+'|'+cod,nom:e.cli,det:cod,precio,costo,margen:baMargen(precio,costo).margenNeto,
-        activo:esActivo(e),dec:2,net:S.bandejas.net,
+        activo:esActivo(e),dec:2,net:NET(),
         set:v=>{ S.bandejas.ensaladeras[ei].p[cod]= e.mon==='USD'? v : Math.round(v*TC()); }}); }); });
     Object.keys(S.bandejas.clamshells).forEach(cod=>{
       const precio=S.bandejas.clamshells[cod], costo=bandejaCostByCod(cod);
       out.push({i:'cl|'+cod,nom:'Lista clamshells',det:cod,precio,costo,margen:baMargen(precio,costo).margenNeto,
-        activo:true,dec:2,net:S.bandejas.net,set:v=>{ S.bandejas.clamshells[cod]=Math.round(v*100)/100; }}); });
+        activo:true,dec:2,net:NET(),set:v=>{ S.bandejas.clamshells[cod]=Math.round(v*100)/100; }}); });
     return out; }
   return [];
 }
@@ -1239,6 +1314,10 @@ function openPegar(mod){
 function getPath(p){ return p.split('.').reduce((o,k)=>o?.[/^\d+$/.test(k)?+k:k], S); }
 const _RANGO={merma:[0,.9],recuperacion:[0,1],cargas:[1,3],stretchPct:[0,3],pctFlete:[0,1],
   admin:[0,.5],iibb:[0,.5],dyc:[0,.5],financiero:[0,.5],ganancias:[0,.6]};
+function NET(){ return S.net || {admin:0,iibb:0,dyc:0,financiero:0,ganancias:0}; }
+function SEM(){ return S.sem || {v:0.45,a:0.25}; }
+/* TC del dia (para mostrar) vs TC operativo (el que usan costos y margenes) */
+function TCD(){ return num(S.tc.value)||1; }
 function esActivo(o){ return o.activo!==false; }
 function verInact(){ return !!(S&&S.cfg&&S.cfg.verInactivos); }
 function chkActivo(path,activo){
@@ -1341,8 +1420,8 @@ function moduleSummary(){
   const bMax=bRows.reduce((m,r)=>r.m>m.m?r:m,bRows[0]||{m:0});
 
   const dist=(rows,acc,sg=0.30,sa=0.15)=>{ let g=0,y=0,r=0; rows.forEach(x=>{const s=semaforo(acc(x),sg,sa); if(s==='v')g++;else if(s==='a')y++;else r++;}); return {g,y,r,n:rows.length}; };
-  const sp=S.pet.sem||{v:.30,a:.15}, spp=S.petpe.sem||{v:.30,a:.15};
-  const petD=dist(petC,c=>c.margenNeto,sp.v,sp.a), ppD=dist(ppRows,r=>r.margenNeto,spp.v,spp.a), bD=dist(bRows,r=>r.m,bp.semVerde,bp.semAmarillo);
+  const sp=SEM(), spp=SEM();
+  const petD=dist(petC,c=>c.margenNeto,sp.v,sp.a), ppD=dist(ppRows,r=>r.margenNeto,spp.v,spp.a), bD=dist(bRows,r=>r.m);
 
   // margen operativo combinado
   const netoItems=petC.length+ppRows.length+bRows.length;
@@ -1512,7 +1591,7 @@ function petVarDetail(vi,v,proc,p,factor,tc){
 
 function renderPET(){
   const vr=petVariantes();
-  const proc=petProc(), p=S.pet.params, n=S.pet.net, tc=TC();
+  const proc=petProc(), p=S.pet.params, n=NET(), tc=TC();
   const rows=S.pet.clientes.map((c,i)=>({...petClientRow(c,vr),i})).filter(r=>verInact()||r.activo);
   const nInact=S.pet.clientes.filter(c=>!esActivo(c)).length;
   const sub=subTab.pet;
@@ -1686,11 +1765,11 @@ function renderPET(){
     <div class="card">
       <div class="card-h"><h3>Gastos sobre la venta</h3><span class="tag">% sobre venta</span></div>
       <div class="card-b"><div class="params-grid">
-        ${field('pet.net.admin',(n.admin*100),'Admin no cargado',{type:'pctnum',unit:'%',sub:'Oficina, contabilidad, sistemas'})}
-        ${field('pet.net.iibb',(n.iibb*100),'IIBB s/ventas',{type:'pctnum',unit:'%'})}
-        ${field('pet.net.dyc',(n.dyc*100),'Déb. y Créd. + otros',{type:'pctnum',unit:'%'})}
-        ${field('pet.net.financiero',(n.financiero*100),'Gastos financieros',{type:'pctnum',unit:'%'})}
-        ${field('pet.net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%'})}
+        ${field('net.admin',(n.admin*100),'Admin no cargado',{type:'pctnum',unit:'%',sub:'Oficina, contabilidad, sistemas'})}
+        ${field('net.iibb',(n.iibb*100),'IIBB s/ventas',{type:'pctnum',unit:'%'})}
+        ${field('net.dyc',(n.dyc*100),'Déb. y Créd. + otros',{type:'pctnum',unit:'%'})}
+        ${field('net.financiero',(n.financiero*100),'Gastos financieros',{type:'pctnum',unit:'%'})}
+        ${field('net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%'})}
       </div></div></div>`;
   }
 
@@ -1975,7 +2054,7 @@ async function petSheetVariantes(wb){
   petTitle(wb,ws,'PET Lámina · Costo por variante (con fórmulas)',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
 }
 async function petSheetClientes(wb){
-  const vr=petVariantes(), n=S.pet.net, gPct=n.admin+n.iibb+n.dyc+n.financiero, ws=wb.addWorksheet('Resumen Clientes');
+  const vr=petVariantes(), n=NET(), gPct=n.admin+n.iibb+n.dyc+n.financiero, ws=wb.addWorksheet('Resumen Clientes');
   const rows=S.pet.clientes.map(c=>{ const r=petClientRow(c,vr); return {...r, gPct, ganPct:n.ganancias, gastosUSD:r.gastos, __sg:0.30, __sa:0.15}; });
   const H=[{t:'Cliente',k:'cli',w:22},{t:'Variante',k:'variante',w:18},{t:'P. anterior',k:'ant',w:12,fmt:XF.usd2},
     {t:'P. actual',k:'precio',w:12,fmt:XF.usd2},{t:'Aumento',k:'aumento',w:10,fmt:XF.pct,f:R=>`IF(C${R}=0,0,(D${R}-C${R})/C${R})`},
@@ -1988,7 +2067,7 @@ async function petSheetClientes(wb){
   ws.views=[{state:'frozen',ySplit:4}];
 }
 async function petSheetNotas(wb){
-  const n=S.pet.net, ws=wb.addWorksheet('Notas');
+  const n=NET(), ws=wb.addWorksheet('Notas');
   const H=[{t:'Notas y supuestos',k:'n',w:90}];
   const rows=[
     {n:'Costo de procesamiento = energía + mano de obra + cono + pallet + stretch + flete + otros + indirectos.'},
@@ -2224,7 +2303,7 @@ function renderPE(){
    MÓDULO LAMINADO PET/PE
    ============================================================ */
 function renderPETPE(){
-  const proc=petpeProc(), p=S.petpe.params, n=S.petpe.net, tc=TC();
+  const proc=petpeProc(), p=S.petpe.params, n=NET(), tc=TC();
   const rowsAll=S.petpe.productos.map((pr,i)=>({...petpeRow(pr),i,activo:esActivo(pr)}));
   const rows=rowsAll.filter(r=>verInact()||r.activo);
   const nInact=rowsAll.filter(r=>!r.activo).length;
@@ -2354,7 +2433,7 @@ function renderPETPE(){
         ${rows.map(r=>{ const s=semaforo(r.margenNeto); const open=ppMExp.has(r.i);
           return `<tr${r.activo?'':' class="row-inact"'}>
           <td>${chkActivo(`petpe.productos.${r.i}`,r.activo)}</td>
-          <td style="text-align:left">${r.cli}</td>
+          <td style="text-align:left">${r.cli}<div class="formula" style="font-size:10px;opacity:.7">${r.vPET} · ${usd(r.cPETkg,3)}/kg</div></td>
           <td class="num" style="text-align:left">${r.med}</td>
           <td class="num">${usd(r.costo,2)}</td>
           <td class="hist-cell">${celdaAnterior(r,'petpe',r.i,2)}</td>
@@ -2396,11 +2475,11 @@ function renderPETPE(){
     <div class="card">
       <div class="card-h"><h3>Gastos sobre la venta</h3><span class="tag">% sobre venta</span></div>
       <div class="card-b"><div class="params-grid">
-        ${field('petpe.net.admin',(n.admin*100),'Admin',{type:'pctnum',unit:'%'})}
-        ${field('petpe.net.iibb',(n.iibb*100),'IIBB',{type:'pctnum',unit:'%'})}
-        ${field('petpe.net.dyc',(n.dyc*100),'DyC + otros',{type:'pctnum',unit:'%'})}
-        ${field('petpe.net.financiero',(n.financiero*100),'Financieros',{type:'pctnum',unit:'%'})}
-        ${field('petpe.net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%'})}
+        ${field('net.admin',(n.admin*100),'Admin',{type:'pctnum',unit:'%'})}
+        ${field('net.iibb',(n.iibb*100),'IIBB',{type:'pctnum',unit:'%'})}
+        ${field('net.dyc',(n.dyc*100),'DyC + otros',{type:'pctnum',unit:'%'})}
+        ${field('net.financiero',(n.financiero*100),'Financieros',{type:'pctnum',unit:'%'})}
+        ${field('net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%'})}
       </div></div></div>`;
   }
 
@@ -2462,7 +2541,7 @@ function renderBandejas(){
           <td>${nInp(`bandejas.productos.${r.i}.neto`,r.neto,{w:60})}</td>
           <td>${nInp(`bandejas.productos.${r.i}.vel`,r.vel,{w:64})}</td>
           <td>${nInp(`bandejas.productos.${r.i}.otros`,r.otros,{w:60})}</td>
-          <td style="white-space:nowrap">${nf(r.uCaja)} u/caja · ${nf(r.uPall)} u/pallet${(r.formatos||[]).length>1?` <span class="tag">+${r.formatos.length-1}</span>`:''}</td>
+          <td style="white-space:nowrap"><div class="formula" style="font-size:10px;opacity:.75;margin-bottom:2px">${baVarNom(r)} · ${usd(baPrecioLamina(r),3)}/kg</div>${nf(r.uCaja)} u/caja · ${nf(r.uPall)} u/pallet${(r.formatos||[]).length>1?` <span class="tag">+${r.formatos.length-1}</span>`:''}</td>
           <td class="num"><b>${usd(r.usdMillar,2)}</b></td>
           <td><span class="lnk" data-exp="${r.i}">${open?'ocultar ▲':'desglose ▼'}</span></td>
           <td class="row-actions"><button class="mini-x" data-del-b="${r.i}">✕</button></td></tr>
@@ -2494,13 +2573,13 @@ function renderBandejas(){
       <div class="note" style="margin-top:8px">Caja: promedio de la cotización Kraft Liner del 19/03/2026 (E900 $1.085,14 · T900 $620,82). Las unidades por caja y por pallet se cargan por producto arriba. <b>Clamshells:</b> 15.500 u/pallet (F40/F41/F43) y 10.000 u/pallet (F50/F61/F63). <b>Ensaladeras:</b> E900/E910 300·500·440·100 u/caja · T900 300·1.000·100 u/caja. <b>S900 falta confirmar.</b> Los clientes marcados “s/caja” ponen ellos la caja y ese costo no se les carga.</div></div></div>
 
     <div class="card" style="margin-top:16px">
-      <div class="card-h"><h3>Gastos sobre la venta</h3><span class="tag">para llegar al margen operativo</span></div>
+      <div class="card-h"><h3>Gastos sobre la venta</h3><span class="tag">compartidos con PET y Laminado</span></div>
       <div class="card-b"><div class="params-grid">
-        ${field('bandejas.net.admin',(S.bandejas.net.admin*100),'Administración',{type:'pctnum',unit:'%'})}
-        ${field('bandejas.net.iibb',(S.bandejas.net.iibb*100),'IIBB',{type:'pctnum',unit:'%'})}
-        ${field('bandejas.net.dyc',(S.bandejas.net.dyc*100),'Desc. y comisiones',{type:'pctnum',unit:'%'})}
-        ${field('bandejas.net.financiero',(S.bandejas.net.financiero*100),'Financiero',{type:'pctnum',unit:'%'})}
-        ${field('bandejas.net.ganancias',(S.bandejas.net.ganancias*100),'Ganancias',{type:'pctnum',unit:'%',sub:'informativo: no se descuenta'})}
+        ${field('net.admin',(NET().admin*100),'Administración',{type:'pctnum',unit:'%'})}
+        ${field('net.iibb',(NET().iibb*100),'IIBB',{type:'pctnum',unit:'%'})}
+        ${field('net.dyc',(NET().dyc*100),'Desc. y comisiones',{type:'pctnum',unit:'%'})}
+        ${field('net.financiero',(NET().financiero*100),'Financiero',{type:'pctnum',unit:'%'})}
+        ${field('net.ganancias',(NET().ganancias*100),'Ganancias',{type:'pctnum',unit:'%',sub:'informativo: no se descuenta'})}
       </div></div></div>`;
   } else {
     const ensCods=S.bandejas.productos.filter(x=>x.linea==='Ensaladera').map(x=>x.cod);
@@ -2670,8 +2749,8 @@ function priceSnapshot(){
   return {
     tc:TC(),
     params:{ pe:clone(S.pe.params), pet:clone(S.pet.params), petpe:clone(S.petpe.params),
-             bandejas:clone(S.bandejas.params), netPet:clone(S.pet.net), netPp:clone(S.petpe.net),
-             netBa:clone(S.bandejas.net||{}) },
+             bandejas:clone(S.bandejas.params), netPet:clone(NET()), netPp:clone(NET()),
+             netBa:cloneNET() },
     pet:S.pet.clientes.map(c=>({cli:c.cli,v:c.v,act:c.act})),
     petpe:S.petpe.productos.map(p=>({cli:p.cli,med:p.med,precio:p.precio})),
     bandejas:{ ensaladeras:clone(S.bandejas.ensaladeras), clamshells:clone(S.bandejas.clamshells) },
@@ -3209,7 +3288,7 @@ async function exportPpPrecios(){
   await download(wb,'Winflex_LaminadoPETPE_precios.xlsx');
 }
 async function ppSheetMargenParams(wb){
-  const n=S.petpe.net, ws=wb.addWorksheet('Parámetros margen');
+  const n=NET(), ws=wb.addWorksheet('Parámetros margen');
   const H=[{t:'Parámetro',k:'par',w:30},{t:'Valor',k:'val',w:14,fmt:XF.pct}];
   const rows=[{par:'Admin',val:n.admin},{par:'IIBB',val:n.iibb},{par:'DyC + otros',val:n.dyc},
     {par:'Financieros',val:n.financiero},{par:'Impuesto a las ganancias',val:n.ganancias}];
@@ -3344,7 +3423,7 @@ function ppCalcDefaults(){
     cPET:petpeCostPET(), cPE:petpeCostPE(), proc:petpeProc().procKg, tc:Math.round(TC()), precio:pr.precio||0, qty:1000 };
 }
 function ppCalcCompute(){
-  const c=ppCalc, g=c.geom, dPET=S.petpe.params.densPET, dPE=S.petpe.params.densPE, n=S.petpe.net;
+  const c=ppCalc, g=c.geom, dPET=S.petpe.params.densPET, dPE=S.petpe.params.densPE, n=NET();
   const yPET=(g.aFin*g.tiras)/(g.aPET||1), yPE=(g.aFin*g.tiras)/(g.aPE||1);
   const gPET=g.ePET*dPET, gPE=g.ePE*dPE, gTot=(gPET+gPE)||1;
   const pPET=gPET/gTot, pPE=gPE/gTot;
@@ -3441,7 +3520,7 @@ function ppSnapshot(label){
   const avgCost=rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1);
   return { id:Date.now(), date:nowISO(), label:label||('Costo '+new Date().toLocaleDateString('es-AR')),
     tc:TC(), proc:clone(proc), cPET, cPE, avgCost,
-    params:clone(S.petpe.params), adhesivos:clone(S.petpe.adhesivos), net:clone(S.petpe.net),
+    params:clone(S.petpe.params), adhesivos:clone(S.petpe.adhesivos), net:clone(NET()),
     products:rows.map(r=>({cli:r.cli,med:r.med,costo:r.costo,precio:r.precio,margenNeto:r.margenNeto})) };
 }
 function ppSaveCost(){
@@ -3486,7 +3565,7 @@ function openPpCostHistory(){
   $$('#modal [data-pppdf]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); generatePpCostPDF(b.dataset.pppdf); });
   $$('#modal [data-ppact]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); const h=S.petpe.costHistory.find(x=>x.id==b.dataset.ppact); if(!h)return;
     if(!confirm(`¿Activar “${h.label}”? Se sobrescriben parámetros, adhesivos y márgenes actuales.`)) return;
-    S.petpe.params=clone(h.params); S.petpe.adhesivos=clone(h.adhesivos); S.petpe.net=clone(h.net);
+    S.petpe.params=clone(h.params); S.petpe.adhesivos=clone(h.adhesivos); NET()=clone(h.net);
     commit(); closeModal(); renderPETPE(); toast('Costo activado','ok'); });
   $$('#modal [data-ppdel]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); S.petpe.costHistory=S.petpe.costHistory.filter(x=>x.id!=b.dataset.ppdel); commit(); openPpCostHistory(); });
 }
@@ -3571,7 +3650,7 @@ async function ppSheetProductos(wb){
   ws.views=[{state:'frozen',ySplit:4}];
 }
 async function ppSheetPrecios(wb){
-  const rows=S.petpe.productos.map(petpeRow), n=S.petpe.net, gPct=n.admin+n.iibb+n.dyc+n.financiero, ws=wb.addWorksheet('Precios y márgenes');
+  const rows=S.petpe.productos.map(petpeRow), n=NET(), gPct=n.admin+n.iibb+n.dyc+n.financiero, ws=wb.addWorksheet('Precios y márgenes');
   const H=[{t:'Cliente',k:'cli',w:20},{t:'Medida',k:'med',w:12},{t:'Costo',k:'costo',w:12,fmt:XF.usd3},{t:'Precio',k:'precio',w:11,fmt:XF.usd2},
     {t:'M.Bruto',k:'margenBruto',w:10,fmt:XF.pct,f:R=>`IF(D${R}=0,0,(D${R}-C${R})/D${R})`},
     {t:'Gastos %',k:'gPct',w:10,fmt:XF.pct},{t:'Gastos USD',k:'gastos',w:11,fmt:XF.usd3,f:R=>`D${R}*F${R}`},

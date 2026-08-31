@@ -751,6 +751,19 @@ function migrate(){
       nota:"no compra desde 11/2025",ult:"2025-11",tipo:"sin mov.",hist:[]});
     m=12; changed=true;
   }
+  if(m < 13){
+    // el formato de caja pasa a ser por canal Y producto
+    S.bandejas.ensaladeras.forEach(e=>{
+      const viejo=(typeof e.fmt==='number')?e.fmt:null, o={};
+      Object.keys(e.p||{}).forEach(cod=>{
+        const pr=S.bandejas.productos.find(x=>x.cod===cod);
+        const dispo=((pr&&pr.formatos)||[]).map(f=>+f.u);
+        o[cod]=(viejo!=null&&dispo.includes(+viejo))?+viejo:(dispo[0]!=null?dispo[0]:300);
+      });
+      e.fmt=o;
+    });
+    m=13; changed=true;
+  }
   if(changed){ S.meta.migr=m; scheduleSave(); }
 }
 
@@ -939,6 +952,12 @@ function baVarNom(prod){
   const vs=petVariantes();
   return (vs[prod.v!=null?prod.v:(prod.mat==='Negro'?2:0)]||vs[0]).nom;
 }
+/* formato que usa un canal para UN producto: e.fmt es {cod: unidadesPorCaja} */
+function baFmtDe(e,cod){
+  if(e && e.fmt && typeof e.fmt==='object') return e.fmt[cod];
+  if(e && typeof e.fmt==='number') return e.fmt;   // dato viejo: un solo formato para todo
+  return null;
+}
 function baFormato(prod,fmtU){
   const F=(prod.formatos&&prod.formatos.length)?prod.formatos:[{u:prod.uCaja||1,up:prod.uPallet||1}];
   return (fmtU!=null && F.find(x=>+x.u===+fmtU)) || F[0];
@@ -1087,7 +1106,7 @@ function clientesData(){
 
   S.bandejas.ensaladeras.forEach(e=>{ if(!verInact() && !esActivo(e)) return; Object.entries(e.p).forEach(([cod,val])=>{
     if(val==null) return;
-    const precio=e.mon==='USD'?val:val/TC(), costo=bandejaCostByCod(cod,e.cajaCli,e.fmt);
+    const precio=e.mon==='USD'?val:val/TC(), costo=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod));
     push(e.cli,{mod:'Ensaladeras',tag:'green',det:cod+(e.cajaCli?' · s/caja':''),unidad:'USD/millar',
       precio,costo,margen:baMargen(precio,costo).margenNeto,activo:esActivo(e),
       ref:{t:'bandejas',i:S.bandejas.ensaladeras.indexOf(e)}}); }); });
@@ -1213,7 +1232,7 @@ function listaFilas(mod){
         activo:esActivo(p),dec:3,net:NET(),set:v=>priceCommit(S.petpe.productos[i],'precio',v)}; }); }
   if(mod==='bandejas'){ const out=[];
     S.bandejas.ensaladeras.forEach((e,ei)=>{ Object.keys(e.p).forEach(cod=>{
-      const precio=e.mon==='USD'?e.p[cod]:e.p[cod]/TC(), costo=bandejaCostByCod(cod,e.cajaCli,e.fmt);
+      const precio=e.mon==='USD'?e.p[cod]:e.p[cod]/TC(), costo=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod));
       out.push({i:ei+'|'+cod,nom:e.cli,det:cod,precio,costo,margen:baMargen(precio,costo).margenNeto,
         activo:esActivo(e),dec:2,net:NET(),
         set:v=>{ S.bandejas.ensaladeras[ei].p[cod]= e.mon==='USD'? v : Math.round(v*TC()); }}); }); });
@@ -1483,6 +1502,38 @@ function openDuplicados(){
     toast(borrar.length+' filas fusionadas','ok');
   };
 }
+/* ---- editor de formatos de caja por producto ---- */
+function openFormatos(i){
+  const pr=S.bandejas.productos[i];
+  const rows=()=> (pr.formatos||[]).map((f,k)=>`<tr>
+      <td><input class="tinp" type="number" data-fu="${k}" value="${f.u}" style="max-width:90px"></td>
+      <td><input class="tinp" type="number" data-fp="${k}" value="${f.up}" style="max-width:100px"></td>
+      <td class="num formula">${f.u?(f.up/f.u).toFixed(1):'\u2014'}</td>
+      <td class="num formula">${usd((S.bandejas.params.cajaARS/f.u + S.bandejas.params.palletARS/f.up)/TC()*1000,2)}</td>
+      <td><button class="mini-x" data-fdel="${k}">\u2715</button></td></tr>`).join('');
+  openModal(`
+    <div class="modal-h"><h3>\ud83d\udce6 Formatos de caja \u00b7 ${pr.cod}</h3><button class="x" onclick="closeModal()">\u2715</button></div>
+    <div class="modal-b">
+      <div class="note" style="margin-bottom:12px">Cada canal elige despu\u00e9s cu\u00e1l de estos formatos usa para este producto. De ac\u00e1 sale el costo de empaque.</div>
+      <table><thead><tr><th>u/caja</th><th>u/pallet</th><th>cajas/pallet</th><th>empaque USD/millar</th><th></th></tr></thead>
+        <tbody id="fmtBody">${rows()}</tbody></table>
+      <button class="btn sm primary" id="fmtAdd" style="margin-top:10px">+ Formato</button>
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn amber" id="fmtOk">Guardar</button></div>`);
+  const bind=()=>{ $$('[data-fdel]').forEach(b=>b.onclick=()=>{ pr.formatos.splice(+b.dataset.fdel,1); $('#fmtBody').innerHTML=rows(); bind(); }); };
+  bind();
+  $('#fmtAdd').onclick=()=>{ pr.formatos=pr.formatos||[]; pr.formatos.push({u:300,up:10800}); $('#fmtBody').innerHTML=rows(); bind(); };
+  $('#fmtOk').onclick=()=>{
+    const nf2=[]; $$('[data-fu]').forEach(inp=>{ const k=+inp.dataset.fu;
+      const u=num(inp.value), up=num($(`[data-fp="${k}"]`).value);
+      if(u>0&&up>0) nf2.push({u,up}); });
+    if(!nf2.length){ toast('Tiene que quedar al menos un formato','err'); return; }
+    pushUndo('formatos de '+pr.cod);
+    pr.formatos=nf2.sort((a,b)=>a.u-b.u);
+    commit(); closeModal(); renderBandejas(); toast('Formatos actualizados','ok');
+  };
+}
 function openPapelera(){
   const p=S.papelera||[];
   openModal(`
@@ -1602,7 +1653,7 @@ function moduleSummary(){
   const bp=S.bandejas.params; const bRows=[];
   S.bandejas.ensaladeras.forEach(e=>{ Object.entries(e.p).forEach(([cod,val])=>{
     if(!esActivo(e)) return;
-    const precio=e.mon==='USD'?val:val/TC(); const costo=bandejaCostByCod(cod,e.cajaCli,e.fmt); const mm=baMargen(precio,costo);
+    const precio=e.mon==='USD'?val:val/TC(); const costo=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod)); const mm=baMargen(precio,costo);
     bRows.push({cli:e.cli,cod,precio,costo,mb:mm.margenBruto,m:mm.margenNeto}); }); });
   Object.entries(S.bandejas.clamshells).forEach(([cod,val])=>{ const costo=bandejaCostByCod(cod); const mm=baMargen(val,costo);
     bRows.push({cli:'Lista clamshells',cod,precio:val,costo,mb:mm.margenBruto,m:mm.margenNeto}); });
@@ -2753,7 +2804,7 @@ function renderBandejas(){
           <td>${nInp(`bandejas.productos.${r.i}.neto`,r.neto,{w:60})}</td>
           <td>${nInp(`bandejas.productos.${r.i}.vel`,r.vel,{w:64})}</td>
           <td>${nInp(`bandejas.productos.${r.i}.otros`,r.otros,{w:60})}</td>
-          <td style="white-space:nowrap"><div class="formula" style="font-size:10px;opacity:.75;margin-bottom:2px">${baVarNom(r)} · ${usd(baPrecioLamina(r),3)}/kg</div>${nf(r.uCaja)} u/caja · ${nf(r.uPall)} u/pallet${(r.formatos||[]).length>1?` <span class="tag">+${r.formatos.length-1}</span>`:''}</td>
+          <td style="white-space:nowrap"><div class="formula" style="font-size:10px;opacity:.75;margin-bottom:2px">${baVarNom(r)} · ${usd(baPrecioLamina(r),3)}/kg</div><span class="lnk" data-fmted="${r.i}">${(r.formatos||[]).map(f=>nf(f.u)).join(' · ')} u/caja ✎</span></td>
           <td class="num"><b>${usd(r.usdMillar,2)}</b></td>
           <td><span class="lnk" data-exp="${r.i}">${open?'ocultar ▲':'desglose ▼'}</span></td>
           <td class="row-actions"><button class="mini-x" data-del-b="${r.i}">✕</button></td></tr>
@@ -2799,8 +2850,8 @@ function renderBandejas(){
     S.bandejas.ensaladeras.forEach((e,ei)=>{ ensCods.forEach(cod=>{
       const val=e.p[cod]; if(val==null)return;
       if(!verInact() && !esActivo(e)) return;
-      const precio=e.mon==='USD'?val:val/tc; const costo=bandejaCostByCod(cod,e.cajaCli,e.fmt); const mm=baMargen(precio,costo);
-      ensRows.push({ei,cli:e.cli,mon:e.mon,cod,val,precio,costo,activo:esActivo(e),cajaCli:!!e.cajaCli,fmt:e.fmt,uCaja:baFormato(S.bandejas.productos.find(x=>x.cod===cod)||{},e.fmt).u,mb:mm.margenBruto,m:mm.margenNeto}); }); });
+      const precio=e.mon==='USD'?val:val/tc; const costo=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod)); const mm=baMargen(precio,costo);
+      ensRows.push({ei,cli:e.cli,mon:e.mon,cod,val,precio,costo,activo:esActivo(e),cajaCli:!!e.cajaCli,fmt:e.fmt,uCaja:baFormato(S.bandejas.productos.find(x=>x.cod===cod)||{},baFmtDe(e,cod)).u,mb:mm.margenBruto,m:mm.margenNeto}); }); });
     const ensAvg=ensRows.reduce((a,r)=>a+r.m,0)/(ensRows.length||1);
     const clamRows=Object.entries(S.bandejas.clamshells).map(([cod,val])=>{
       const costo=bandejaCostByCod(cod); const mm=baMargen(val,costo); return {cod,val,costo,mb:mm.margenBruto,m:mm.margenNeto}; });
@@ -2821,7 +2872,11 @@ function renderBandejas(){
           return `<tr${r.activo===false?' class="row-inact"':''}><td>${chkActivo(`bandejas.ensaladeras.${r.ei}`,r.activo!==false)}</td><td style="text-align:left">${r.cli}${r.cajaCli?' <span class="tag" title="el cliente pone la caja">s/caja</span>':''}</td><td><span class="chip">${r.cod}</span></td>
           <td><select class="tsel" data-path="bandejas.ensaladeras.${r.ei}.mon"><option ${r.mon==='USD'?'selected':''}>USD</option><option ${r.mon==='ARS'?'selected':''}>ARS</option></select></td>
           <td>${nInp(`bandejas.ensaladeras.${r.ei}.p.${r.cod}`,r.val,{w:84})}</td>
-          <td>${nInp(`bandejas.ensaladeras.${r.ei}.fmt`,r.fmt!=null?r.fmt:r.uCaja,{w:64})}</td>
+          <td>${(function(){ const pr=S.bandejas.productos.find(x=>x.cod===r.cod)||{formatos:[]};
+              const sel=baFmtDe(S.bandejas.ensaladeras[r.ei],r.cod);
+              return `<select class="tsel" data-fmt="${r.ei}|${r.cod}" style="max-width:106px">
+                ${(pr.formatos||[]).map((f,k)=>`<option value="${f.u}" ${(sel!=null?+sel===+f.u:k===0)?'selected':''}>${nf(f.u)} u/caja</option>`).join('')}
+              </select>`; })()}</td>
           <td class="num">${usd(r.precio,2)}</td><td class="num">${usd(r.costo,2)}</td>
           <td class="num">${usd(r.precio-r.costo,2)}</td><td class="num">${pct(r.mb,1)}</td><td class="num"><b>${pct(r.m,1)}</b></td>
           <td><span class="pill ${s}">${semLabel(s)}</span></td></tr>`;}).join('')}
@@ -2859,6 +2914,12 @@ function renderBandejas(){
   if($('#bSave')) $('#bSave').onclick=baListSave;
   if($('#bHist')) $('#bHist').onclick=openBaListHistory;
   if($('#bAdd')) $('#bAdd').onclick=()=>{ S.bandejas.productos.push({cod:'NEW',linea:'Clamshell',mat:'Cristal',bruto:20,neto:16,vel:7000,otros:0.06}); commit(); renderBandejas(); };
+  $$('#page-bandejas [data-fmted]').forEach(b=>b.onclick=()=>openFormatos(+b.dataset.fmted));
+  $$('#page-bandejas [data-fmt]').forEach(sl=>sl.onchange=()=>{
+    const [ei,cod]=sl.dataset.fmt.split('|'), e=S.bandejas.ensaladeras[+ei];
+    if(typeof e.fmt!=='object' || e.fmt===null) e.fmt={};
+    e.fmt[cod]=+sl.value; commit(); renderBandejas();
+  });
   $$('#page-bandejas [data-del-b]').forEach(b=>b.onclick=()=>borrarFila('bandejas',+b.dataset.delB,()=>{bExp.clear();renderBandejas();}));
   $$('#page-bandejas [data-exp]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.exp; bExp.has(i)?bExp.delete(i):bExp.add(i); renderBandejas(); });
 }

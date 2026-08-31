@@ -250,6 +250,10 @@ td .formula{display:block;margin-top:3px;white-space:normal}
 .filterbar .search{margin-left:0}
   tr.row-inact{ opacity:.5; background:repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(0,0,0,.02) 6px,rgba(0,0,0,.02) 12px); }
   tr.row-inact .tinp{ background:#f6f6f6; }
+  .th-sort{ cursor:pointer; user-select:none; white-space:nowrap; }
+  .th-sort:hover{ color:var(--teal); }
+  .sort-i{ opacity:.45; font-size:9px; margin-left:3px; }
+  .th-sort:hover .sort-i{ opacity:.9; }
   .chk-act input{ width:16px;height:16px;cursor:pointer;accent-color:var(--teal); }
   .tinp.precio-vig{ border:1.5px solid var(--teal); background:#fff; font-weight:600; }
   .tinp.precio-vig:focus{ box-shadow:0 0 0 3px rgba(31,143,83,.15); }
@@ -283,6 +287,7 @@ td .formula{display:block;margin-top:3px;white-space:normal}
       <button class="btn sm ghost" id="tcRefresh" title="Traer dólar BNA">⟳ BNA</button>
     </div>
     <button class="icon-btn" id="btnUndo" title="Deshacer" style="display:none">↶</button>
+    <button class="icon-btn" id="btnPapelera" title="Papelera" style="display:none">🗑️</button>
     <button class="icon-btn" id="btnHistory" title="Historial de listas">🕘</button>
     <button class="icon-btn" id="btnSettings" title="Configuración / sync">⚙️</button>
     <button class="icon-btn" id="btnLogout" title="Salir">⎋</button>
@@ -521,6 +526,7 @@ const SEED = {
     listHistory:[]
   },
 
+  papelera:[], // filas borradas, restaurables
   history:[]   // snapshots manuales de listas de precios
 };
 
@@ -564,6 +570,17 @@ async function loadState(){
 /* Migraciones sobre datos ya guardados en la nube (el seed solo no alcanza) */
 function migrate(){
   let m = (S.meta && S.meta.migr) || 0, changed=false;
+  const M_ACTUAL = 12;
+  if(m < M_ACTUAL){
+    // foto de los precios ANTES de tocar nada: queda en el historial de listas
+    try{
+      S.history = S.history || [];
+      S.history.unshift({id:Date.now(),date:nowISO(),
+        label:`Auto \u00b7 respaldo antes de actualizar la app (v${m} \u2192 v${M_ACTUAL})`,
+        snap:priceSnapshot()});
+      if(S.history.length>50) S.history.length=50;
+    }catch(e){}
+  }
   if(m < 1){
     // 1) 'cargas' de bandejas pasa de incremento (0,5) a multiplicador (1,5), igual que el resto
     const bp=S.bandejas.params;
@@ -612,23 +629,29 @@ function migrate(){
   }
   if(m < 4){
     // listas de precios vigentes al 28/08/2026 (Excel PET y PET/PE + pantallas de bandejas)
+    // NO se pisan precios: lo que esta guardado siempre gana. Solo se completa lo que falta.
     const PET={}; SEED.pet.clientes.forEach(c=>{ PET[c.cli+'|'+c.v]=c; });
     S.pet.clientes.forEach(c=>{ const n=PET[c.cli+'|'+c.v];
-      if(n){ c.ant=c.act; c.act=n.act; if(c.activo==null) c.activo=n.activo; if(!c.nota) c.nota=n.nota; } });
+      if(n){ if(c.act==null) c.act=n.act;
+             if(c.activo==null) c.activo=n.activo;
+             if(!c.nota) c.nota=n.nota; } });
     SEED.pet.clientes.forEach(n=>{ if(!S.pet.clientes.some(c=>c.cli===n.cli && c.v===n.v)) S.pet.clientes.push({...n}); });
     S.pet.clientes.forEach(c=>{ if(c.activo==null) c.activo=true; });
 
     const PP={}; SEED.petpe.productos.forEach(p=>{ PP[p.cli+'|'+p.med]=p; });
     S.petpe.productos.forEach(p=>{ const n=PP[p.cli+'|'+p.med];
-      if(n && n.precio!==p.precio){ p.ant=p.precio; p.precio=n.precio; } });
+      if(n && p.precio==null) p.precio=n.precio; });
     SEED.petpe.productos.forEach(n=>{ if(!S.petpe.productos.some(p=>p.cli===n.cli && p.med===n.med)) S.petpe.productos.push({...n}); });
 
-    S.bandejas.clamshells.F61=88; S.bandejas.clamshells.F63=80;
+    if(S.bandejas.clamshells.F61===80) S.bandejas.clamshells.F61=88;
+    if(S.bandejas.clamshells.F63===75) S.bandejas.clamshells.F63=80;
     const ENS={Bandex:{E900:60,T900:41,S900:41,E910:65},
       Nitopi:{E900:88856,T900:62200,S900:62200,E910:98856},
       'Winflex (directo)':{E900:120094,T900:84065,S900:84065,E910:126097},
       'Envases FS / Group':{E900:112121,T900:76950,S900:76950,E910:115420}};
-    S.bandejas.ensaladeras.forEach(e=>{ if(ENS[e.cli]) Object.assign(e.p, ENS[e.cli]); });
+    // solo completa los que falten; nunca pisa un precio ya cargado
+    S.bandejas.ensaladeras.forEach(e=>{ const n=ENS[e.cli]; if(!n) return;
+      Object.keys(n).forEach(k=>{ if(e.p[k]==null) e.p[k]=n[k]; }); });
     m=4; changed=true;
   }
   if(m < 5){
@@ -678,6 +701,9 @@ function migrate(){
       const otro  = mejor===p ? q : p;
       mejor.hist = (mejor.hist&&mejor.hist.length) ? mejor.hist : (otro.hist||[]);
       if(mejor.ant==null && otro.ant!=null){ mejor.ant=otro.ant; mejor.antD=otro.antD; }
+      // si la otra fila fue editada a mano (tiene historial o fecha de cambio), su precio manda
+      const editada = (otro.hist&&otro.hist.length) || otro.antD;
+      if(editada && otro.precio!=null) mejor.precio=otro.precio;
       if(mejor.activo==null && otro.activo!=null) mejor.activo=otro.activo;
       out[prev]=mejor;
     });
@@ -716,6 +742,14 @@ function migrate(){
     // el pallet de lamina lleva 800 kg, no 500: cambia el prorrateo del traslado y del pallet
     if(S.pet.params.palletCap===500) S.pet.params.palletCap=800;
     m=11; changed=true;
+  }
+  if(m < 12){
+    if(!S.papelera) S.papelera=[];
+    // SILMAG (PET Virgen Azulino) se perdio al depurar duplicados: se repone si falta
+    const hay=S.pet.clientes.some(c=>/silmag/i.test(c.cli));
+    if(!hay) S.pet.clientes.push({cli:"SILMAG",v:6,ant:7.43,act:7.43,activo:false,
+      nota:"no compra desde 11/2025",ult:"2025-11",tipo:"sin mov.",hist:[]});
+    m=12; changed=true;
   }
   if(changed){ S.meta.migr=m; scheduleSave(); }
 }
@@ -947,6 +981,7 @@ function bandejaCostByCod(cod,sinCaja,fmtU){ const pr=S.bandejas.productos.find(
 function cliKey(n){
   return String(n||'').toUpperCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\bGRAF\b|\bGRAFICA\b|\bGRAFICAS\b/g,'GRAF')
     .replace(/\([^)]*\)/g,' ')
     .replace(/[^A-Z0-9 ]/g,' ')
     .replace(/\s+/g,' ').trim();
@@ -1076,6 +1111,29 @@ function clientesData(){
 }
 
 let cliSearch='', cliExp=new Set();
+/* orden de las tablas: alfabetico por defecto, clickeable por columna */
+let petSort={k:'cli',dir:1};
+const SORTERS={
+  cli:      r=>cliKey(r.cli),
+  variante: r=>r.variante||'',
+  act:      r=>+r.act||0,
+  aumento:  r=>+r.aumento||0,
+  costo:    r=>+r.costo||0,
+  margenBruto:r=>+r.margenBruto||0,
+  margenNeto: r=>+r.margenNeto||0
+};
+function ordenar(rows,st){
+  const g=SORTERS[st.k]||SORTERS.cli;
+  return rows.slice().sort((a,b)=>{
+    const x=g(a), y=g(b);
+    if(typeof x==='string') return st.dir*x.localeCompare(y,'es');
+    return st.dir*(x-y);
+  });
+}
+function thSort(k,label,st,extra){
+  const on=st.k===k;
+  return `<th class="th-sort" data-sort="${k}" title="Ordenar por ${label}"${extra||''}>${label}<span class="sort-i">${on?(st.dir>0?'\u25b2':'\u25bc'):'\u21c5'}</span></th>`;
+}
 function renderClientes(){
   const rows=clientesData();
   const f=cliSearch?rows.filter(r=>cliKey(r.nom).includes(cliKey(cliSearch))):rows;
@@ -1319,6 +1377,134 @@ function openPegar(mod){
 function getPath(p){ return p.split('.').reduce((o,k)=>o?.[/^\d+$/.test(k)?+k:k], S); }
 const _RANGO={merma:[0,.9],recuperacion:[0,1],cargas:[1,3],stretchPct:[0,3],pctFlete:[0,1],
   admin:[0,.5],iibb:[0,.5],dyc:[0,.5],financiero:[0,.5],ganancias:[0,.6]};
+/* Papelera: nada de lo que se borra se pierde de verdad. */
+const PAPELERA={
+  pet:      {arr:()=>S.pet.clientes,      nom:'PET Lámina',    lbl:o=>`${o.cli} · ${(S.pet.variantes[o.v]||{}).nom||''}`},
+  petpe:    {arr:()=>S.petpe.productos,   nom:'Laminado',      lbl:o=>`${o.cli} · ${o.med}`},
+  bandejas: {arr:()=>S.bandejas.productos,nom:'Bandejas',      lbl:o=>`${o.cod} · ${o.linea}`}
+};
+function borrarFila(tipo,i,after){
+  const cfg=PAPELERA[tipo], arr=cfg.arr(), o=arr[i];
+  if(!o) return;
+  if(!confirm(`¿Borrar "${cfg.lbl(o)}"?\n\nVa a la papelera: lo podés restaurar desde el 🗑 de arriba.`)) return;
+  pushUndo('borrar '+cfg.lbl(o));
+  S.papelera=S.papelera||[];
+  S.papelera.unshift({t:tipo,d:hoyISO(),lbl:cfg.lbl(o),o:clone(o)});
+  if(S.papelera.length>30) S.papelera.length=30;
+  arr.splice(i,1);
+  commit(); if(after) after(); renderPapeleraBtn();
+  toast('Borrado · está en la papelera','ok');
+}
+function renderPapeleraBtn(){
+  const b=$('#btnPapelera'); if(!b || typeof S==='undefined' || !S) return;
+  const n=(S.papelera||[]).length;
+  b.style.display=n?'inline-flex':'none';
+  b.title=`Papelera (${n})`;
+}
+/* ============================================================
+   DEPURAR DUPLICADOS
+   ============================================================ */
+function dupGrupos(){
+  const cls=S.pet.clientes, vr=petVariantes();
+  const keys=[...new Set(cls.map(c=>cliKey(c.cli)))];
+  const canon={}; keys.forEach(k=>canon[k]=mergeKey(k,keys));
+  // A) misma persona + misma variante = fila repetida
+  const porFila={};
+  cls.forEach((c,i)=>{ const k=canon[cliKey(c.cli)]+'|'+c.v; (porFila[k]=porFila[k]||[]).push(i); });
+  const filas=Object.entries(porFila).filter(([,ix])=>ix.length>1)
+    .map(([k,ix])=>({k,ix,variante:(vr[cls[ix[0]].v]||{}).nom||''}));
+  // B) mismo cliente escrito de varias formas
+  const porNom={};
+  cls.forEach((c,i)=>{ const k=canon[cliKey(c.cli)]; (porNom[k]=porNom[k]||new Set()).add(c.cli); });
+  const nombres=Object.entries(porNom).filter(([,set])=>set.size>1)
+    .map(([k,set])=>({k,variantes:[...set],ix:cls.map((c,i)=>canon[cliKey(c.cli)]===k?i:-1).filter(i=>i>=0)}));
+  return {filas,nombres};
+}
+function openDuplicados(){
+  const {filas,nombres}=dupGrupos(), cls=S.pet.clientes, vr=petVariantes();
+  const fila=i=>{ const c=cls[i], r=petClientRow(c,vr), n=(c.hist||[]).length;
+    return `<label style="display:flex;gap:8px;align-items:center;padding:6px 8px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;cursor:pointer">
+      <input type="radio" name="g${i>=0?'':''}" data-keep="${i}">
+      <span style="flex:1"><b>${c.cli}</b> · ${r.variante}</span>
+      <span class="num" style="width:70px;text-align:right">${usd(c.act,3)}</span>
+      <span class="formula" style="width:110px;text-align:right">${n?n+' cambios':'sin historial'}</span>
+      <span class="formula" style="width:80px;text-align:right">${c.antD?fmtFecha(c.antD):'sin fecha'}</span>
+    </label>`; };
+  openModal(`
+    <div class="modal-h"><h3>\ud83e\uddf9 Depurar duplicados \u00b7 PET L\u00e1mina</h3><button class="x" onclick="closeModal()">\u2715</button></div>
+    <div class="modal-b">
+      ${!filas.length&&!nombres.length?'<div class="empty" style="padding:24px">No hay duplicados.</div>':''}
+      ${filas.length?`<h4 style="margin:0 0 8px">Filas repetidas <span class="tag">mismo cliente y misma variante</span></h4>
+        <div class="note" style="margin-bottom:10px">Eleg\u00ed cu\u00e1l se queda. Las otras van a la papelera y su historial de precios se suma a la que sobrevive.</div>
+        ${filas.map((g,gi)=>`<div style="margin-bottom:14px;padding:10px;background:var(--bg2);border-radius:10px">
+          <div class="formula" style="margin-bottom:6px">${g.variante}</div>
+          ${g.ix.map(i=>fila(i).replace('name="g"',`name="grp${gi}"`)).join('')}
+        </div>`).join('')}`:''}
+      ${nombres.length?`<h4 style="margin:16px 0 8px">Mismo cliente, nombres distintos</h4>
+        <div class="note" style="margin-bottom:10px">Unificar el nombre no borra ninguna fila: solo las deja escritas igual para que agrupen bien.</div>
+        ${nombres.map((g,gi)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;padding:8px;background:var(--bg2);border-radius:8px">
+          <span style="flex:1">${g.variantes.map(v=>`<span class="chip">${v}</span>`).join(' ')}</span>
+          <select data-nom="${gi}">${g.variantes.map(v=>`<option>${v}</option>`).join('')}</select>
+          <button class="btn sm primary" data-unif="${gi}">Unificar</button>
+        </div>`).join('')}`:''}
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cerrar</button>
+      ${filas.length?'<button class="btn amber" id="dupOk">Fusionar las filas elegidas</button>':''}</div>`,true);
+
+  $$('[data-unif]').forEach(b=>b.onclick=()=>{
+    const gi=+b.dataset.unif, g=dupGrupos().nombres[gi]; if(!g) return;
+    const nom=$(`[data-nom="${gi}"]`).value;
+    pushUndo('unificar nombre '+nom);
+    g.ix.forEach(i=>{ S.pet.clientes[i].cli=nom; });
+    commit(); closeModal(); renderAll(); toast('Nombres unificados: '+nom,'ok');
+  });
+  const ok=$('#dupOk'); if(ok) ok.onclick=()=>{
+    const keep=$$('[data-keep]:checked').map(r=>+r.dataset.keep);
+    if(!keep.length){ toast('Eleg\u00ed cu\u00e1l se queda en cada grupo','err'); return; }
+    const gs=dupGrupos().filas;
+    const borrar=[];
+    gs.forEach(g=>{ const k=g.ix.find(i=>keep.includes(i)); if(k==null) return;
+      g.ix.forEach(i=>{ if(i===k) return;
+        const a=S.pet.clientes[k], b=S.pet.clientes[i];
+        a.hist=[...(a.hist||[]),...(b.hist||[])].sort((x,y)=>String(y.d||'').localeCompare(String(x.d||''))).slice(0,12);
+        if(a.ant==null && b.ant!=null){ a.ant=b.ant; a.antD=b.antD; }
+        if(!a.nota && b.nota) a.nota=b.nota;
+        borrar.push(i); }); });
+    if(!borrar.length){ toast('No hay nada para fusionar','err'); return; }
+    if(!confirm(`Se van a fusionar ${borrar.length} filas.\n\nVan a la papelera y pod\u00e9s deshacer con \u21b6.`)) return;
+    pushUndo('fusionar '+borrar.length+' duplicados');
+    S.papelera=S.papelera||[];
+    borrar.sort((a,b)=>b-a).forEach(i=>{
+      const o=S.pet.clientes[i];
+      S.papelera.unshift({t:'pet',d:hoyISO(),lbl:`${o.cli} \u00b7 ${(vr[o.v]||{}).nom||''}`,o:clone(o)});
+      S.pet.clientes.splice(i,1); });
+    if(S.papelera.length>30) S.papelera.length=30;
+    commit(); closeModal(); renderAll(); renderPapeleraBtn();
+    toast(borrar.length+' filas fusionadas','ok');
+  };
+}
+function openPapelera(){
+  const p=S.papelera||[];
+  openModal(`
+    <div class="modal-h"><h3>\ud83d\uddd1\ufe0f Papelera</h3><button class="x" onclick="closeModal()">\u2715</button></div>
+    <div class="modal-b">
+      ${p.length?`<div class="note" style="margin-bottom:12px">Restaurar vuelve a agregar la fila con todos sus datos y su historial de precios. No toca nada de lo demás.</div>
+      <table><thead><tr><th>Qué</th><th>Módulo</th><th>Borrado</th><th></th></tr></thead><tbody>
+      ${p.map((x,k)=>`<tr><td style="text-align:left"><b>${x.lbl}</b></td>
+        <td><span class="chip">${(PAPELERA[x.t]||{}).nom||x.t}</span></td>
+        <td class="num">${fmtFecha(x.d)}</td>
+        <td><button class="btn sm primary" data-restore="${k}">Restaurar</button></td></tr>`).join('')}
+      </tbody></table>`:'<div class="empty" style="padding:24px">La papelera está vacía.</div>'}
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cerrar</button></div>`);
+  $$('[data-restore]').forEach(b=>b.onclick=()=>{
+    const k=+b.dataset.restore, x=S.papelera[k]; if(!x) return;
+    PAPELERA[x.t].arr().push(clone(x.o));
+    S.papelera.splice(k,1);
+    commit(); closeModal(); renderAll(); renderPapeleraBtn();
+    toast('Restaurado: '+x.lbl,'ok');
+  });
+}
 function NET(){ return S.net || {admin:0,iibb:0,dyc:0,financiero:0,ganancias:0}; }
 function SEM(){ return S.sem || {v:0.45,a:0.25}; }
 /* TC del dia (para mostrar) vs TC operativo (el que usan costos y margenes) */
@@ -1597,8 +1783,9 @@ function petVarDetail(vi,v,proc,p,factor,tc){
 function renderPET(){
   const vr=petVariantes();
   const proc=petProc(), p=S.pet.params, n=NET(), tc=TC();
-  const rows=S.pet.clientes.map((c,i)=>({...petClientRow(c,vr),i})).filter(r=>verInact()||r.activo);
+  const rows=ordenar(S.pet.clientes.map((c,i)=>({...petClientRow(c,vr),i})).filter(r=>verInact()||r.activo),petSort);
   const nInact=S.pet.clientes.filter(c=>!esActivo(c)).length;
+  const _dg=dupGrupos(), nDup=_dg.filas.reduce((a,g)=>a+g.ix.length-1,0)+_dg.nombres.length;
   const sub=subTab.pet;
   S.pet.listHistory=S.pet.listHistory||[];
 
@@ -1743,10 +1930,22 @@ function renderPET(){
           <button class="btn sm" id="petSaveList">💾 Guardar lista</button>
           <button class="btn sm" id="petHistList">🕘 Historial</button>
           ${toggleInactBtn(nInact)}
+          ${nDup?`<button class="btn sm amber" id="petDup">\ud83e\uddf9 Duplicados (${nDup})</button>`:''}
           <button class="btn sm primary" id="petAdd">+ Cliente</button>
         </div></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th title="destildar = dejó de comprar">Act.</th><th>Cliente</th><th>Variante</th><th>Precio anterior</th><th>Precio vigente</th><th>Variación</th><th>Costo</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th></tr></thead><tbody>
+        <th title="destildar = dejó de comprar">Act.</th>
+        ${thSort('cli','Cliente',petSort)}
+        ${thSort('variante','Variante',petSort)}
+        <th>Precio anterior</th>
+        ${thSort('act','Precio vigente',petSort)}
+        ${thSort('aumento','Variación',petSort)}
+        ${thSort('costo','Costo',petSort)}
+        ${thSort('margenBruto','M.Bruto',petSort)}
+        <th>M.Oper. USD</th>
+        ${thSort('margenNeto','M.Oper.%',petSort)}
+        ${thSort('margenNeto','Estado',petSort)}
+        <th></th></tr></thead><tbody>
         ${filt.length?filt.map(r=>{ const s=semaforo(r.margenNeto); const ar=r.aumento;
           return `<tr${r.activo?'':' class="row-inact"'}>
           <td>${chkActivo(`pet.clientes.${r.i}`,r.activo)}</td>
@@ -1795,7 +1994,15 @@ function renderPET(){
     $('#petSaveList').onclick=petListSave;
     $('#petHistList').onclick=openPetListHistory;
     $('#petAdd').onclick=()=>{ S.pet.clientes.push({cli:'Nuevo cliente',v:0,ant:0,act:0}); commit(); renderPET(); };
-    $$('#page-pet [data-del-pet]').forEach(b=>b.onclick=()=>{ S.pet.clientes.splice(+b.dataset.delPet,1); commit(); renderPET(); });
+    $$('#page-pet [data-del-pet]').forEach(b=>b.onclick=()=>borrarFila('pet',+b.dataset.delPet,renderPET));
+    if($('#petDup')) $('#petDup').onclick=openDuplicados;
+    $$('#page-pet [data-sort]').forEach(t=>t.onclick=()=>{
+      const k=t.dataset.sort;
+      // el orden natural: texto ascendente, numeros descendentes (peor arriba en margenes)
+      if(petSort.k===k) petSort.dir*=-1;
+      else petSort={k,dir:(k==='cli'||k==='variante')?1:(k==='margenNeto'||k==='margenBruto'?1:-1)};
+      renderPET();
+    });
   }
 }
 
@@ -2497,7 +2704,7 @@ function renderPETPE(){
   if($('#ppSave')) $('#ppSave').onclick = sub==='costos' ? ppSaveCost : ppListSave;
   if($('#ppHist')) $('#ppHist').onclick = sub==='costos' ? openPpCostHistory : openPpListHistory;
   if($('#ppAdd')) $('#ppAdd').onclick=()=>{ S.petpe.productos.push({cli:'Nuevo',med:'000x000',aPET:400,ePET:250,aPE:420,ePE:50,aFin:380,tiras:1,precio:3.5,ant:3.5}); commit(); renderPETPE(); };
-  $$('#page-petpe [data-del-pp]').forEach(b=>b.onclick=()=>{ S.petpe.productos.splice(+b.dataset.delPp,1); ppExp.clear(); ppMExp.clear(); commit(); renderPETPE(); });
+  $$('#page-petpe [data-del-pp]').forEach(b=>b.onclick=()=>borrarFila('petpe',+b.dataset.delPp,()=>{ppExp.clear();ppMExp.clear();renderPETPE();}));
   $$('#page-petpe [data-link]').forEach(c=>c.onchange=()=>{ S.petpe.params[c.dataset.link]=c.checked; commit(); renderPETPE(); });
   $$('#page-petpe [data-exp]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.exp; ppExp.has(i)?ppExp.delete(i):ppExp.add(i); renderPETPE(); });
   $$('#page-petpe [data-mexp]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.mexp; ppMExp.has(i)?ppMExp.delete(i):ppMExp.add(i); renderPETPE(); });
@@ -2652,7 +2859,7 @@ function renderBandejas(){
   if($('#bSave')) $('#bSave').onclick=baListSave;
   if($('#bHist')) $('#bHist').onclick=openBaListHistory;
   if($('#bAdd')) $('#bAdd').onclick=()=>{ S.bandejas.productos.push({cod:'NEW',linea:'Clamshell',mat:'Cristal',bruto:20,neto:16,vel:7000,otros:0.06}); commit(); renderBandejas(); };
-  $$('#page-bandejas [data-del-b]').forEach(b=>b.onclick=()=>{ S.bandejas.productos.splice(+b.dataset.delB,1); bExp.clear(); commit(); renderBandejas(); });
+  $$('#page-bandejas [data-del-b]').forEach(b=>b.onclick=()=>borrarFila('bandejas',+b.dataset.delB,()=>{bExp.clear();renderBandejas();}));
   $$('#page-bandejas [data-exp]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.exp; bExp.has(i)?bExp.delete(i):bExp.add(i); renderBandejas(); });
 }
 
@@ -2755,7 +2962,7 @@ function priceSnapshot(){
     tc:TC(),
     params:{ pe:clone(S.pe.params), pet:clone(S.pet.params), petpe:clone(S.petpe.params),
              bandejas:clone(S.bandejas.params), netPet:clone(NET()), netPp:clone(NET()),
-             netBa:cloneNET() },
+             netBa:clone(NET()) },
     pet:S.pet.clientes.map(c=>({cli:c.cli,v:c.v,act:c.act})),
     petpe:S.petpe.productos.map(p=>({cli:p.cli,med:p.med,precio:p.precio})),
     bandejas:{ ensaladeras:clone(S.bandejas.ensaladeras), clamshells:clone(S.bandejas.clamshells) },
@@ -4103,6 +4310,7 @@ function init(){
       commit(); renderActive();
       toast(t.checked?'Reactivado':'Marcado inactivo · sale de promedios y semáforos','ok'); } });
   $('#btnUndo').onclick=doUndo; renderUndoBtn();
+  $('#btnPapelera').onclick=openPapelera; renderPapeleraBtn();
   $('#btnHistory').onclick=openHistory;
   $('#btnSettings').onclick=openSettings;
   $('#btnLogout').onclick=()=>{ try{sessionStorage.removeItem('winflex-cp-unlocked');}catch(e){} $('#pinInput').value=''; $('#app').style.display='none'; $('#login').style.display='flex'; $('#pinInput').focus(); };

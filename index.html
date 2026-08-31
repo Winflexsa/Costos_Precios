@@ -379,7 +379,7 @@ const SEED = {
   pet:{
     params:{ energia:0.20, valorHora:8500, cargas:1.5, operarios:2.5, prodHora:300,
       otrosVarios:0.01, otrosIndirectos:0.01, merma:0.12, recuperacion:0.11,
-      conoARSkg:1852, conoKgBobina:2, kgBobinaProd:200, palletARS:6500, palletCap:500,
+      conoARSkg:1852, conoKgBobina:2, kgBobinaProd:200, palletARS:6500, palletCap:800,
       stretchPct:0.5, fletePallet:50000, pctFlete:1 },
     net:{ admin:0.02, iibb:0.035, dyc:0.015, financiero:0.03, ganancias:0.35 },
     sem:{ v:0.30, a:0.15 },
@@ -578,7 +578,7 @@ function migrate(){
     m=1; changed=true;
   }
   if(m < 2){
-    // empaque real: se entrega en fábrica (sin flete), stretch nulo, pallet $6.800,
+    // empaque real: se entrega en fábrica (sin traslado), stretch nulo, pallet $6.800,
     // caja = promedio de la cotización Kraft Liner 19/03/2026 (E900 1085,14 / T900 620,82)
     const bp=S.bandejas.params;
     bp.cajaARS=853; bp.palletARS=6800; bp.stretchARS=0; bp.fletePallet=0; bp.pctFlete=0;
@@ -711,6 +711,11 @@ function migrate(){
     S.bandejas.productos.forEach(pr=>{ if(pr.v==null) pr.v = pr.mat==='Negro'?2:0; });
     if(S.tc.usarLista==null) S.tc.usarLista=false;
     m=10; changed=true;
+  }
+  if(m < 11){
+    // el pallet de lamina lleva 800 kg, no 500: cambia el prorrateo del traslado y del pallet
+    if(S.pet.params.palletCap===500) S.pet.params.palletCap=800;
+    m=11; changed=true;
   }
   if(changed){ S.meta.migr=m; scheduleSave(); }
 }
@@ -860,10 +865,10 @@ function petpeProc(){
   const subRef=MOref+enerRef+p.otrosRef;
   return {adhes,MOlam,enerLam,subLam,MOref,enerRef,otrosRef:p.otrosRef,subRef,procKg:subLam+subRef};
 }
-/* La lamina que consumen Laminado y Termoformado es la NUESTRA: se valua al costo
-   de produccion de la variante, SIN el flete de entrega a cliente. */
+/* La lamina que consumen Laminado y Termoformado es la NUESTRA, y para llegar a Lanus
+   paga el traslado desde Chivilcoy. Por eso se valua CON ese costo incluido. */
 function petpeCostPET(vIdx){ const p=S.petpe.params;
-  if(p.linkPET){ const vs=petVariantes(); const v=vs[vIdx!=null?vIdx:0]||vs[0]; return v.sFlete; }
+  if(p.linkPET){ const vs=petVariantes(); const v=vs[vIdx!=null?vIdx:0]||vs[0]; return v.cFlete; }
   return p.costoLaminaPET; }
 function petpeCostPE(){ const p=S.petpe.params; if(p.linkPE){ return calcPE().total; } return p.costoLaminaPE; }
 function petpeRow(pr){
@@ -892,7 +897,7 @@ function petpeRow(pr){
 function baPrecioLamina(prod){
   const p=S.bandejas.params;
   if(p.linkPET!==false){ const vs=petVariantes();
-    return (vs[prod.v!=null?prod.v:(prod.mat==='Negro'?2:0)]||vs[0]).sFlete; }
+    return (vs[prod.v!=null?prod.v:(prod.mat==='Negro'?2:0)]||vs[0]).cFlete; }
   return prod.mat==='Negro'?p.mpNegro:p.mpCristal;
 }
 function baVarNom(prod){
@@ -1566,7 +1571,7 @@ function petVarDetail(vi,v,proc,p,factor,tc){
     return `<tr><td style="text-align:left"><span class="chip">${ins.cod}</span> ${ins.desc}</td>
       <td class="num">${pct(x,0)}</td><td class="num">${usd(ins.usd||0,2)}</td><td class="num">${usd(x*(ins.usd||0),3)}</td></tr>`;}).filter(Boolean).join('');
   const procMini=[['Energía',proc.energia],['Mano de obra',proc.MO],['Cono',proc.cono],['Pallet',proc.pallet],
-    ['Stretch+etiq.',proc.stretch],['Flete',proc.flete],['Otros+indir.',proc.otros+proc.indirectos]]
+    ['Stretch+etiq.',proc.stretch],['Traslado a Lanús',proc.flete],['Otros+indir.',proc.otros+proc.indirectos]]
     .map(([l,val])=>`<div class="ei">${l}<b>${usd(val,4)}</b></div>`).join('');
   return `<tr class="exp-row"><td colspan="9"><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
     <div>
@@ -1580,9 +1585,9 @@ function petVarDetail(vi,v,proc,p,factor,tc){
         <div class="bu"><span>MP base</span><b>${usd(v.mpBase,3)}</b></div>
         <div class="bu op"><span>× factor merma neta · 1 ÷ (1 − ${pct(p.merma-p.recuperacion,0)})</span><b>× ${factor.toFixed(3)}</b></div>
         <div class="bu sum"><span>MP ajustada</span><b>${usd(v.mpAjust,3)}</b></div>
-        <div class="bu op"><span>+ Procesamiento c/flete</span><b>${usd(proc.totalCFlete,3)}</b></div>
+        <div class="bu op"><span>+ Procesamiento c/traslado</span><b>${usd(proc.totalCFlete,3)}</b></div>
         <div class="exp-grid" style="margin:4px 0 8px">${procMini}</div>
-        <div class="bu grand"><span>= Total c/flete</span><b>${usd(v.cFlete,3)} · ${ars(v.arsC)}</b></div>
+        <div class="bu grand"><span>= Total c/traslado</span><b>${usd(v.cFlete,3)} · ${ars(v.arsC)}</b></div>
         <div class="bu"><span>− Flete (cliente retira)</span><b>${usd(v.sFlete,3)}</b></div>
       </div>
     </div>
@@ -1614,7 +1619,7 @@ function renderPET(){
     const hero=`<div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>Costo final por variante</h3><span class="tag">tocá una variante para ver el detalle · merma neta ${pct(p.merma-p.recuperacion,0)} · TC ${ars(tc)}</span></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th>Variante</th><th>Color</th><th>MP base</th><th>MP ajust.</th><th>+ Proc. c/flete</th><th>Total c/flete</th><th>Total s/flete</th><th>ARS/kg</th><th></th></tr></thead><tbody>
+        <th>Variante</th><th>Color</th><th>MP base</th><th>MP ajust.</th><th>+ Proc. c/traslado</th><th>Total c/traslado</th><th>Total s/traslado</th><th>ARS/kg</th><th></th></tr></thead><tbody>
         ${vr.map((v,vi)=>{ const open=petVarExp.has(vi);
           return `<tr class="clickrow" data-vrow="${vi}" style="cursor:pointer">
             <td style="text-align:left"><b>${v.nom}</b></td>
@@ -1630,7 +1635,7 @@ function renderPET(){
         <tr class="total"><td style="text-align:left">RANGO</td><td></td><td></td><td></td><td></td>
           <td class="num">${usd(cheap.cFlete,3)} → ${usd(dear.cFlete,3)}</td><td></td><td></td><td></td></tr>
       </tbody></table></div>
-      <div class="note" style="margin-top:8px">Más barata: <b>${cheap.nom}</b> (${usd(cheap.cFlete,3)}/kg) · Más cara: <b>${dear.nom}</b> (${usd(dear.cFlete,3)}/kg). El procesamiento c/flete es común a todas; lo que cambia es la materia prima de cada receta.</div></div></div>`;
+      <div class="note" style="margin-top:8px">Más barata: <b>${cheap.nom}</b> (${usd(cheap.cFlete,3)}/kg) · Más cara: <b>${dear.nom}</b> (${usd(dear.cFlete,3)}/kg). El procesamiento c/traslado es común a todas; lo que cambia es la materia prima de cada receta.</div></div></div>`;
 
     const parts=[
       {label:'Energía',formula:'directo de parámetros',usd:proc.energia,color:'var(--blue)'},
@@ -1638,7 +1643,7 @@ function renderPET(){
       {label:'Cono',formula:`($${nf(p.conoARSkg)}/kg × ${p.conoKgBobina} ÷ ${p.kgBobinaProd} kg) ÷ TC`,usd:proc.cono,color:'var(--amber)'},
       {label:'Pallet',formula:`$${nf(p.palletARS)} ÷ ${p.palletCap} kg ÷ TC`,usd:proc.pallet,color:'#9b6dd6'},
       {label:'Stretch + etiquetas',formula:`${pct(p.stretchPct,0)} sobre cono+pallet`,usd:proc.stretch,color:'#d6a96d'},
-      {label:'Flete',formula:`$${nf(p.fletePallet)} × ${pct(p.pctFlete,0)} ÷ ${p.palletCap} kg ÷ TC`,usd:proc.flete,color:'var(--red)'},
+      {label:'Traslado Chivilcoy→Lanús',formula:`$${nf(p.fletePallet)} × ${pct(p.pctFlete,0)} ÷ ${p.palletCap} kg ÷ TC`,usd:proc.flete,color:'var(--red)'},
       {label:'Otros varios',formula:'directo de parámetros',usd:proc.otros,color:'var(--muted)'},
       {label:'Otros indirectos',formula:'directo de parámetros',usd:proc.indirectos,color:'#b8c0bc'}
     ];
@@ -1661,14 +1666,14 @@ function renderPET(){
     body=`
     <div class="grid g4" style="margin-bottom:16px">
       <div class="card stat accent"><div class="k">Costo prom. variante</div><div class="v">${usd(ppAvg,3)}<small>/kg</small></div><div class="d">${vr.length} variantes · ${ars(ppAvg*tc)}/kg</div></div>
-      <div class="card stat"><div class="k">Costo de proceso</div><div class="v">${usd(proc.totalCFlete,3)}<small>/kg</small></div><div class="d">c/flete · común a todas</div></div>
+      <div class="card stat"><div class="k">Costo de proceso</div><div class="v">${usd(proc.totalCFlete,3)}<small>/kg</small></div><div class="d">c/traslado · común a todas</div></div>
       <div class="card stat"><div class="k">MP promedio ajustada</div><div class="v">${usd(mpAvg,3)}<small>/kg</small></div><div class="d">merma neta ${pct(p.merma-p.recuperacion,0)}</div></div>
       <div class="card stat"><div class="k">Rango de costo</div><div class="v">${usd(cheap.cFlete,2)}<small>–${usd(dear.cFlete,2)}</small></div><div class="d">${cheap.nom} → ${dear.nom}</div></div>
     </div>
 
     ${hero}
 
-    <div style="margin-bottom:16px">${anatomyCard('Anatomía del costo de procesamiento (común a todas las variantes)',parts,'Total procesamiento c/flete',{tag:`merma neta ${pct(p.merma-p.recuperacion,0)} · TC ${ars(tc)}`,dec:4})}</div>
+    <div style="margin-bottom:16px">${anatomyCard('Anatomía del costo de procesamiento (común a todas las variantes)',parts,'Total procesamiento c/traslado',{tag:`merma neta ${pct(p.merma-p.recuperacion,0)} · TC ${ars(tc)}`,dec:4})}</div>
 
     ${matrix}
 
@@ -1699,7 +1704,7 @@ function renderPET(){
           ${field('pet.params.palletARS',p.palletARS,'Pallet',{unit:'ARS'})}
           ${field('pet.params.palletCap',p.palletCap,'Pallet capacidad',{unit:'kg'})}
           ${field('pet.params.stretchPct',(p.stretchPct*100),'Stretch+etiq.',{type:'pctnum',unit:'%'})}
-          ${field('pet.params.fletePallet',p.fletePallet,'Flete x pallet',{unit:'ARS'})}
+          ${field('pet.params.fletePallet',p.fletePallet,'Traslado Chivilcoy→Lanús',{unit:'ARS/pallet',sub:'trae las bobinas a Lanús'})}
           ${field('pet.params.pctFlete',(p.pctFlete*100),'% flete Winflex',{type:'pctnum',unit:'%'})}
         </div></div></div>
     </div>`;
@@ -2008,7 +2013,7 @@ async function petSheetParametros(wb){
     {par:'Pallet',val:p.palletARS,uni:'ARS'},
     {par:'Pallet capacidad',val:p.palletCap,uni:'kg'},
     {par:'Stretch + etiquetas',val:p.stretchPct,uni:'fracción'},
-    {par:'Flete por pallet',val:p.fletePallet,uni:'ARS'},
+    {par:'Traslado Chivilcoy→Lanús',val:p.fletePallet,uni:'ARS'},
     {par:'% flete a cargo de Winflex',val:p.pctFlete,uni:'fracción'}
   ];
   petTitle(wb,ws,'PET Lámina · Parámetros',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
@@ -2024,12 +2029,12 @@ async function petSheetCostosKg(wb){
   const tot=proc.totalCFlete||1;
   const H=[{t:'Componente',k:'comp',w:26},{t:'USD/kg',k:'usd',w:13,fmt:XF.usd4},{t:'ARS/kg',k:'ars',w:13,fmt:XF.ars},{t:'% del costo',k:'pc',w:12,fmt:XF.pct,f:R=>`B${R}/$B$13`}];
   const comps=[['Energía',proc.energia],['Mano de obra',proc.MO],['Cono',proc.cono],['Pallet',proc.pallet],
-    ['Stretch + etiquetas',proc.stretch],['Flete',proc.flete],['Otros varios',proc.otros],['Otros indirectos',proc.indirectos]];
+    ['Stretch + etiquetas',proc.stretch],['Traslado a Lanús',proc.flete],['Otros varios',proc.otros],['Otros indirectos',proc.indirectos]];
   const rows=comps.map(([comp,usd])=>({comp,usd,ars:usd*tc,pc:usd/tot}));
   petTitle(wb,ws,'PET Lámina · Costos de procesamiento por kg',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
-  totalRow(ws,13,H,{comp:'TOTAL c/flete',ars:proc.totalCFlete*tc,pc:1});
+  totalRow(ws,13,H,{comp:'TOTAL c/traslado',ars:proc.totalCFlete*tc,pc:1});
   ws.getCell('B13').value={formula:'SUM(B5:B12)',result:proc.totalCFlete}; ws.getCell('B13').numFmt=XF.usd4;
-  totalRow(ws,14,H,{comp:'TOTAL s/flete',ars:proc.totalSFlete*tc});
+  totalRow(ws,14,H,{comp:'TOTAL s/traslado',ars:proc.totalSFlete*tc});
   ws.getCell('B14').value={formula:'B13-B10',result:proc.totalSFlete}; ws.getCell('B14').numFmt=XF.usd4;
 }
 async function petSheetRecetas(wb){
@@ -2046,9 +2051,9 @@ async function petSheetVariantes(wb){
   const factor=1/(1-(p.merma-p.recuperacion));
   const H=[{t:'Variante',k:'nom',w:22},{t:'MP base',k:'mpBase',w:12,fmt:XF.usd3},{t:'× merma',k:'fac',w:10,fmt:'0.000'},
     {t:'MP ajust.',k:'mpAjust',w:12,fmt:XF.usd3,f:R=>`B${R}*C${R}`},
-    {t:'Proc. c/flete',k:'procC',w:13,fmt:XF.usd3},{t:'Proc. s/flete',k:'procS',w:13,fmt:XF.usd3},
-    {t:'Total c/flete',k:'cFlete',w:13,fmt:XF.usd3,f:R=>`D${R}+E${R}`},
-    {t:'Total s/flete',k:'sFlete',w:13,fmt:XF.usd3,f:R=>`D${R}+F${R}`},
+    {t:'Proc. c/traslado',k:'procC',w:13,fmt:XF.usd3},{t:'Proc. s/traslado',k:'procS',w:13,fmt:XF.usd3},
+    {t:'Total c/traslado',k:'cFlete',w:13,fmt:XF.usd3,f:R=>`D${R}+E${R}`},
+    {t:'Total s/traslado',k:'sFlete',w:13,fmt:XF.usd3,f:R=>`D${R}+F${R}`},
     {t:'ARS/kg',k:'arsC',w:13,fmt:XF.ars}];
   const rows=vr.map(v=>({...v,fac:factor,procC:proc.totalCFlete,procS:proc.totalSFlete}));
   petTitle(wb,ws,'PET Lámina · Costo por variante (con fórmulas)',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
@@ -2072,7 +2077,7 @@ async function petSheetNotas(wb){
   const rows=[
     {n:'Costo de procesamiento = energía + mano de obra + cono + pallet + stretch + flete + otros + indirectos.'},
     {n:'MP ajustada = MP base ÷ (1 − merma neta). Merma neta = merma de proceso − recuperación.'},
-    {n:'Costo final por variante = MP ajustada + costo de procesamiento (con o sin flete).'},
+    {n:'Costo final por variante = MP ajustada + costo de procesamiento (con o sin traslado).'},
     {n:`Margen operativo = precio − costo − gastos sobre la venta. Ganancias NO se descuenta: es reparto del resultado, no costo de la operación. Gastos sobre venta: Admin ${pct(n.admin,1)}, IIBB ${pct(n.iibb,1)}, DyC ${pct(n.dyc,1)}, Financieros ${pct(n.financiero,1)}. Imp. Ganancias ${pct(n.ganancias,0)}.`},
     {n:'Semáforo: 🟢 ≥ 30% · 🟡 15–30% · 🔴 < 15% (sobre margen operativo).'},
     {n:'Generado automáticamente desde la app de Costos & Precios de Winflex.'}
@@ -2135,7 +2140,7 @@ function petCalcResultHTML(){
   const bar=breakdownBar([{label:'MP ajustada',val:r.mpAjust,color:'var(--amber)'},{label:'Procesamiento',val:r.proc,color:'var(--teal)'}]);
   return `
   <div class="gauto" style="margin-bottom:14px">
-    <div class="card stat accent"><div class="card-b stat"><div class="k">Costo unitario ${c.flete?'c/flete':'s/flete'}</div>
+    <div class="card stat accent"><div class="card-b stat"><div class="k">Costo unitario ${c.flete?'c/traslado':'s/traslado'}</div>
       <div class="v">${usd(r.costoU,3)}<small>/kg</small></div><div class="d">${ars(r.arsU)}/kg</div></div></div>
     <div class="card stat"><div class="card-b stat"><div class="k">Total ${nf(c.qty)} kg</div>
       <div class="v">${usd(r.totalUSD,2)}</div><div class="d">${ars(r.totalARS)}</div></div></div>
@@ -2147,7 +2152,7 @@ function petCalcResultHTML(){
       <tr class="total"><td style="text-align:left">MP base</td><td></td><td></td><td class="num">${usd(r.mpBase,3)}</td></tr>
       <tr><td style="text-align:left">× factor merma (1 ÷ (1 − ${pct(c.merma,0)}))</td><td></td><td></td><td class="num">× ${r.factor.toFixed(3)}</td></tr>
       <tr class="total"><td style="text-align:left">MP ajustada</td><td></td><td></td><td class="num">${usd(r.mpAjust,3)}</td></tr>
-      <tr><td style="text-align:left">+ Procesamiento ${c.flete?'c/flete':'s/flete'}</td><td></td><td></td><td class="num">${usd(r.proc,3)}</td></tr>
+      <tr><td style="text-align:left">+ Procesamiento ${c.flete?'c/traslado':'s/traslado'}</td><td></td><td></td><td class="num">${usd(r.proc,3)}</td></tr>
       <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= Costo unitario</td><td></td><td></td><td class="num"><b>${usd(r.costoU,3)}</b></td></tr>
     </tbody></table></div></div></div>`;
 }
@@ -2177,7 +2182,7 @@ function openPetCalc(){
            <div class="field"><label>Procesamiento<small>USD/kg</small></label><div class="iw"><input type="number" step="any" id="calc_proc" value="${petCalc.proc.toFixed(4)}"></div></div>
            <div class="field"><label>Cantidad<small>kg</small></label><div class="iw"><input type="number" id="calc_qty" value="${petCalc.qty}"></div></div>
            <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2)">
-             <input type="checkbox" id="calc_flete" checked> Incluir flete (al destildar usa procesamiento s/flete)</label>
+             <input type="checkbox" id="calc_flete" checked> Incluir flete (al destildar usa procesamiento s/traslado)</label>
          </div></div></div>
      </div>
      <div id="calcResult" style="margin-top:14px">${petCalcResultHTML()}</div>
@@ -2211,7 +2216,7 @@ async function exportPetCalc(){
   rows.push({k:'MP base',v:r.mpBase,d:'USD/kg'});
   rows.push({k:'Factor merma neta',v:r.factor,d:'1 ÷ (1 − '+pct(c.merma,0)+')'});
   rows.push({k:'MP ajustada',v:r.mpAjust,d:'USD/kg'});
-  rows.push({k:'Procesamiento '+(c.flete?'c/flete':'s/flete'),v:r.proc,d:'USD/kg'});
+  rows.push({k:'Procesamiento '+(c.flete?'c/traslado':'s/traslado'),v:r.proc,d:'USD/kg'});
   rows.push({k:'COSTO UNITARIO',v:r.costoU,d:'USD/kg · '+ars(r.arsU)+'/kg'});
   rows.push({k:'Tipo de cambio',v:c.tc,d:'ARS/USD'});
   rows.push({k:'Cantidad',v:c.qty,d:'kg'});
@@ -2380,11 +2385,11 @@ function renderPETPE(){
         <div class="card-h"><h3>Insumos lámina &amp; adhesivos</h3></div>
         <div class="card-b">
           <div class="params-grid" style="grid-template-columns:1fr 1fr">
-            ${field('petpe.params.costoLaminaPET',p.costoLaminaPET,'Costo lámina rPET',{unit:'USD/kg',sub:'con flete Lanús→Chivilcoy'})}
+            ${field('petpe.params.costoLaminaPET',p.costoLaminaPET,'Costo lámina rPET',{unit:'USD/kg',sub:'con traslado Lanús→Chivilcoy'})}
             ${field('petpe.params.costoLaminaPE',p.costoLaminaPE,'Costo lámina PE',{unit:'USD/kg'})}
           </div>
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);margin:2px 0 6px">
-            <input type="checkbox" data-link="linkPET" ${p.linkPET?'checked':''}> Vincular costo rPET al módulo PET (rPET Cristal c/flete = ${usd(petVariantes()[0].cFlete,3)})</label>
+            <input type="checkbox" data-link="linkPET" ${p.linkPET?'checked':''}> Vincular costo rPET al módulo PET (rPET Cristal c/traslado = ${usd(petVariantes()[0].cFlete,3)})</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);margin-bottom:10px">
             <input type="checkbox" data-link="linkPE" ${p.linkPE?'checked':''}> Vincular costo PE al módulo Film PE (= ${usd(calcPE().total,3)})</label>
           <div class="tbl-wrap"><table><thead><tr><th>Adhesivo</th><th>USD/kg</th><th>% aplic.</th><th>Aporte</th></tr></thead><tbody>
@@ -2567,8 +2572,8 @@ function renderBandejas(){
         ${field('bandejas.params.cajaARS',p.cajaARS,'Caja de cartón',{unit:'ARS/caja'})}
         ${field('bandejas.params.palletARS',p.palletARS,'Pallet',{unit:'ARS/pallet'})}
         ${field('bandejas.params.stretchARS',p.stretchARS,'Film stretch',{unit:'ARS/pallet',sub:'en clamshells es casi nulo'})}
-        ${field('bandejas.params.fletePallet',p.fletePallet,'Flete',{unit:'ARS/pallet',sub:'0: se entrega en fábrica'})}
-        ${field('bandejas.params.pctFlete',(p.pctFlete*100),'% de envíos con flete',{type:'pctnum',unit:'%'})}
+        ${field('bandejas.params.fletePallet',p.fletePallet,'Flete a cliente',{unit:'ARS/pallet',sub:'0: se entrega en fábrica'})}
+        ${field('bandejas.params.pctFlete',(p.pctFlete*100),'% de envíos con traslado',{type:'pctnum',unit:'%'})}
       </div>
       <div class="note" style="margin-top:8px">Caja: promedio de la cotización Kraft Liner del 19/03/2026 (E900 $1.085,14 · T900 $620,82). Las unidades por caja y por pallet se cargan por producto arriba. <b>Clamshells:</b> 15.500 u/pallet (F40/F41/F43) y 10.000 u/pallet (F50/F61/F63). <b>Ensaladeras:</b> E900/E910 300·500·440·100 u/caja · T900 300·1.000·100 u/caja. <b>S900 falta confirmar.</b> Los clientes marcados “s/caja” ponen ellos la caja y ese costo no se les carga.</div></div></div>
 
@@ -2943,7 +2948,7 @@ async function exportPET(){
   // Hoja variantes
   const wv=wb.addWorksheet('Costo variantes');
   const HV=[{t:'Variante',k:'nom',w:22},{t:'MP base',k:'mpBase',w:12,fmt:XF.usd3},{t:'MP ajust.',k:'mpAjust',w:12,fmt:XF.usd3},
-    {t:'Proc. c/flete',k:'procC',w:13,fmt:XF.usd3},{t:'Total c/flete',k:'cFlete',w:13,fmt:XF.usd3},{t:'Total s/flete',k:'sFlete',w:13,fmt:XF.usd3},{t:'ARS/kg',k:'arsC',w:13,fmt:XF.ars}];
+    {t:'Proc. c/traslado',k:'procC',w:13,fmt:XF.usd3},{t:'Total c/traslado',k:'cFlete',w:13,fmt:XF.usd3},{t:'Total s/traslado',k:'sFlete',w:13,fmt:XF.usd3},{t:'ARS/kg',k:'arsC',w:13,fmt:XF.ars}];
   addTitle(wv,'PET Lámina · Costo por variante',stamp(),HV.length); setCols(wv,HV); headerRow(wv,4,HV); dataRows(wv,5,HV,vr);
   await download(wb,'Winflex_PET_lista.xlsx');
 }
@@ -3731,7 +3736,7 @@ function baProductDetail(r,p,tc){
     <tr><td style="text-align:left">Otros</td><td class="formula" style="text-align:left">MP util × ${usd(r.otros,2)}</td><td class="num">${usd(r.cOtros,5)}</td><td class="num">${ars(r.cOtros*tc)}</td></tr>
     <tr><td style="text-align:left">Caja de cartón</td><td class="formula" style="text-align:left">$${nf(p.cajaARS)} ÷ ${nf(r.uCaja||1)} u/caja ÷ TC</td><td class="num">${usd(r.cCaja,5)}</td><td class="num">${ars(r.cCaja*tc)}</td></tr>
     <tr><td style="text-align:left">Pallet${p.stretchARS?' + stretch':''}</td><td class="formula" style="text-align:left">$${nf(p.palletARS+p.stretchARS)} ÷ ${nf(r.uPall||1)} u/pallet ÷ TC</td><td class="num">${usd(r.cPallet,5)}</td><td class="num">${ars(r.cPallet*tc)}</td></tr>
-    ${p.fletePallet?`<tr><td style="text-align:left">Flete</td><td class="formula" style="text-align:left">$${nf(p.fletePallet)} × ${pct(p.pctFlete,0)} ÷ ${nf(r.uPall||1)} u/pallet ÷ TC</td><td class="num">${usd(r.cFlete,5)}</td><td class="num">${ars(r.cFlete*tc)}</td></tr>`:''}
+    ${p.fletePallet?`<tr><td style="text-align:left">Traslado Chivilcoy→Lanús</td><td class="formula" style="text-align:left">$${nf(p.fletePallet)} × ${pct(p.pctFlete,0)} ÷ ${nf(r.uPall||1)} u/pallet ÷ TC</td><td class="num">${usd(r.cFlete,5)}</td><td class="num">${ars(r.cFlete*tc)}</td></tr>`:''}
     <tr class="total"><td style="text-align:left">= Costo por unidad</td><td></td><td class="num"><b>${usd(r.totalU,5)}</b></td><td class="num">${ars(r.totalU*tc)}</td></tr>
     <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= Costo por millar</td><td class="formula" style="text-align:left">× 1000</td><td class="num"><b>${usd(r.usdMillar,2)}</b></td><td class="num">${ars(r.usdMillar*tc)}</td></tr>
   </tbody></table></div>`;

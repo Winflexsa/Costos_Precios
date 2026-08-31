@@ -250,6 +250,7 @@ td .formula{display:block;margin-top:3px;white-space:normal}
 .filterbar .search{margin-left:0}
   tr.row-inact{ opacity:.5; background:repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(0,0,0,.02) 6px,rgba(0,0,0,.02) 12px); }
   tr.row-inact .tinp{ background:#f6f6f6; }
+  .tinp.emp-man{ border-color:var(--amber); background:#fffdf5; font-weight:600; }
   .th-sort{ cursor:pointer; user-select:none; white-space:nowrap; }
   .th-sort:hover{ color:var(--teal); }
   .sort-i{ opacity:.45; font-size:9px; margin-left:3px; }
@@ -953,6 +954,17 @@ function baVarNom(prod){
   return (vs[prod.v!=null?prod.v:(prod.mat==='Negro'?2:0)]||vs[0]).nom;
 }
 /* formato que usa un canal para UN producto: e.fmt es {cod: unidadesPorCaja} */
+/* empaque cargado a mano para ese canal y producto (USD/millar), o null si se calcula */
+function baEmpDe(e,cod){
+  const v = e && e.emp && e.emp[cod];
+  return (v!=null && isFinite(v) && v!=='') ? +v : null;
+}
+/* el numero que se muestra: el manual si existe, si no el que sale del formato */
+function baEmpUSD(e,cod){
+  const man=baEmpDe(e,cod); if(man!=null) return {usd:man,manual:true};
+  const pr=S.bandejas.productos.find(x=>x.cod===cod); if(!pr) return {usd:0,manual:false};
+  return {usd:bandejaCost(pr,e&&e.cajaCli,baFmtDe(e,cod)).cEmpaque*1000,manual:false};
+}
 function baFmtDe(e,cod){
   if(e && e.fmt && typeof e.fmt==='object') return e.fmt[cod];
   if(e && typeof e.fmt==='number') return e.fmt;   // dato viejo: un solo formato para todo
@@ -962,7 +974,7 @@ function baFormato(prod,fmtU){
   const F=(prod.formatos&&prod.formatos.length)?prod.formatos:[{u:prod.uCaja||1,up:prod.uPallet||1}];
   return (fmtU!=null && F.find(x=>+x.u===+fmtU)) || F[0];
 }
-function bandejaCost(prod,sinCaja,fmtU){
+function bandejaCost(prod,sinCaja,fmtU,empU){
   const p=S.bandejas.params, tc=TC();
   const MOh=p.salario*p.operarios*p.cargas;          // cargas = MULTIPLICADOR (igual que PE/PET/Laminado)
   const desp=prod.bruto-prod.neto;
@@ -974,9 +986,11 @@ function bandejaCost(prod,sinCaja,fmtU){
   const cCaja=sinCaja?0:(p.cajaARS/uCaja)/tc;
   const cPallet=((p.palletARS+p.stretchARS)/uPall)/tc;
   const cFlete=((p.fletePallet*p.pctFlete)/uPall)/tc;
-  const cEmpaque=cCaja+cPallet+cFlete;
+  // empU: costo de empaque cargado a mano, en USD por millar. Si esta, manda.
+  const manual = (empU!=null && isFinite(empU));
+  const cEmpaque = manual ? empU/1000 : (cCaja+cPallet+cFlete);
   const totalU=cMP+cMO+cEner+cOtros+cEmpaque;
-  return {desp,mpUtil,uCaja,uPall,sinCaja,cMP,cMO,cEner,cOtros,cCaja,cPallet,cFlete,cEmpaque,totalU,usdMillar:totalU*1000};
+  return {desp,mpUtil,uCaja,uPall,sinCaja,empManual:manual,cMP,cMO,cEner,cOtros,cCaja,cPallet,cFlete,cEmpaque,totalU,usdMillar:totalU*1000};
 }
 /* margen de bandejas en la MISMA base que PET y Laminado */
 function baMargen(precio,costo){
@@ -989,7 +1003,7 @@ function baMargen(precio,costo){
   return {margenBruto,gastos,preGan,margenOp:precio?preGan/precio:0,gan,netoUSD,
           margenNeto:precio?netoUSD/precio:0};
 }
-function bandejaCostByCod(cod,sinCaja,fmtU){ const pr=S.bandejas.productos.find(x=>x.cod===cod); return pr?bandejaCost(pr,sinCaja,fmtU).usdMillar:0; }
+function bandejaCostByCod(cod,sinCaja,fmtU,empU){ const pr=S.bandejas.productos.find(x=>x.cod===cod); return pr?bandejaCost(pr,sinCaja,fmtU,empU).usdMillar:0; }
 
 /* ============================================================
    UX v2 — vista por cliente, pricing por margen objetivo,
@@ -1106,7 +1120,7 @@ function clientesData(){
 
   S.bandejas.ensaladeras.forEach(e=>{ if(!verInact() && !esActivo(e)) return; Object.entries(e.p).forEach(([cod,val])=>{
     if(val==null) return;
-    const precio=e.mon==='USD'?val:val/TC(), costo=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod));
+    const precio=e.mon==='USD'?val:val/TC(), costo=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod),baEmpDe(e,cod));
     push(e.cli,{mod:'Ensaladeras',tag:'green',det:cod+(e.cajaCli?' · s/caja':''),unidad:'USD/millar',
       precio,costo,margen:baMargen(precio,costo).margenNeto,activo:esActivo(e),
       ref:{t:'bandejas',i:S.bandejas.ensaladeras.indexOf(e)}}); }); });
@@ -1232,7 +1246,7 @@ function listaFilas(mod){
         activo:esActivo(p),dec:3,net:NET(),set:v=>priceCommit(S.petpe.productos[i],'precio',v)}; }); }
   if(mod==='bandejas'){ const out=[];
     S.bandejas.ensaladeras.forEach((e,ei)=>{ Object.keys(e.p).forEach(cod=>{
-      const precio=e.mon==='USD'?e.p[cod]:e.p[cod]/TC(), costo=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod));
+      const precio=e.mon==='USD'?e.p[cod]:e.p[cod]/TC(), costo=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod),baEmpDe(e,cod));
       out.push({i:ei+'|'+cod,nom:e.cli,det:cod,precio,costo,margen:baMargen(precio,costo).margenNeto,
         activo:esActivo(e),dec:2,net:NET(),
         set:v=>{ S.bandejas.ensaladeras[ei].p[cod]= e.mon==='USD'? v : Math.round(v*TC()); }}); }); });
@@ -1502,6 +1516,33 @@ function openDuplicados(){
     toast(borrar.length+' filas fusionadas','ok');
   };
 }
+/* ---- elegir el formato de caja de un canal para un producto ---- */
+function openElegirFormato(ei,cod){
+  const e=S.bandejas.ensaladeras[ei], pr=S.bandejas.productos.find(x=>x.cod===cod);
+  const sel=baFmtDe(e,cod);
+  openModal(`
+    <div class="modal-h"><h3>\ud83d\udce6 ${e.cli} \u00b7 ${cod}</h3><button class="x" onclick="closeModal()">\u2715</button></div>
+    <div class="modal-b">
+      <div class="note" style="margin-bottom:12px">De qu\u00e9 formato sale el empaque de este cliente para este producto.</div>
+      <table><thead><tr><th></th><th>u/caja</th><th>u/pallet</th><th>Empaque USD/mil</th><th>Costo total</th></tr></thead><tbody>
+      ${(pr.formatos||[]).map(f=>{ const c=bandejaCost(pr,e.cajaCli,f.u);
+        return `<tr${+sel===+f.u?' style="background:var(--teal-l)"':''}>
+          <td><input type="radio" name="fsel" value="${f.u}" ${+sel===+f.u?'checked':''}></td>
+          <td class="num"><b>${nf(f.u)}</b></td><td class="num">${nf(f.up)}</td>
+          <td class="num">${usd(c.cEmpaque*1000,2)}</td><td class="num">${usd(c.usdMillar,2)}</td></tr>`;}).join('')}
+      </tbody></table>
+      ${e.cajaCli?'<div class="note" style="margin-top:10px">Este cliente pone su propia caja: el formato solo afecta el prorrateo del pallet.</div>':''}
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn amber" id="fselOk">Usar este formato</button></div>`);
+  $('#fselOk').onclick=()=>{
+    const r=$('input[name="fsel"]:checked'); if(!r) return;
+    if(typeof e.fmt!=='object'||e.fmt===null) e.fmt={};
+    e.fmt[cod]=+r.value; if(e.emp) delete e.emp[cod];
+    commit(); closeModal(); renderBandejas(); toast('Formato actualizado','ok');
+  };
+}
+
 /* ---- editor de formatos de caja por producto ---- */
 function openFormatos(i){
   const pr=S.bandejas.productos[i];
@@ -1653,7 +1694,7 @@ function moduleSummary(){
   const bp=S.bandejas.params; const bRows=[];
   S.bandejas.ensaladeras.forEach(e=>{ Object.entries(e.p).forEach(([cod,val])=>{
     if(!esActivo(e)) return;
-    const precio=e.mon==='USD'?val:val/TC(); const costo=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod)); const mm=baMargen(precio,costo);
+    const precio=e.mon==='USD'?val:val/TC(); const costo=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod),baEmpDe(e,cod)); const mm=baMargen(precio,costo);
     bRows.push({cli:e.cli,cod,precio,costo,mb:mm.margenBruto,m:mm.margenNeto}); }); });
   Object.entries(S.bandejas.clamshells).forEach(([cod,val])=>{ const costo=bandejaCostByCod(cod); const mm=baMargen(val,costo);
     bRows.push({cli:'Lista clamshells',cod,precio:val,costo,mb:mm.margenBruto,m:mm.margenNeto}); });
@@ -2850,7 +2891,7 @@ function renderBandejas(){
     S.bandejas.ensaladeras.forEach((e,ei)=>{ ensCods.forEach(cod=>{
       const val=e.p[cod]; if(val==null)return;
       if(!verInact() && !esActivo(e)) return;
-      const precio=e.mon==='USD'?val:val/tc; const costo=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod)); const mm=baMargen(precio,costo);
+      const precio=e.mon==='USD'?val:val/tc; const costo=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod),baEmpDe(e,cod)); const mm=baMargen(precio,costo);
       ensRows.push({ei,cli:e.cli,mon:e.mon,cod,val,precio,costo,activo:esActivo(e),cajaCli:!!e.cajaCli,fmt:e.fmt,uCaja:baFormato(S.bandejas.productos.find(x=>x.cod===cod)||{},baFmtDe(e,cod)).u,mb:mm.margenBruto,m:mm.margenNeto}); }); });
     const ensAvg=ensRows.reduce((a,r)=>a+r.m,0)/(ensRows.length||1);
     const clamRows=Object.entries(S.bandejas.clamshells).map(([cod,val])=>{
@@ -2867,16 +2908,20 @@ function renderBandejas(){
     <div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>Ensaladeras · precios por cliente</h3><span class="tag">USD/millar · Bandex en USD, resto ARS</span></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th title="destildar = dejó de comprar">Act.</th><th>Cliente</th><th>Producto</th><th>Moneda</th><th>Precio orig.</th><th>u/caja</th><th>USD/millar</th><th>Costo</th><th>Margen USD</th><th>Bruto%</th><th>Neto%</th><th>Estado</th></tr></thead><tbody>
+        <th title="destildar = dejó de comprar">Act.</th><th>Cliente</th><th>Producto</th><th>Moneda</th><th>Precio orig.</th><th title="costo de caja + pallet por millar de unidades">Empaque USD/mil</th><th>USD/millar</th><th>Costo</th><th>Margen USD</th><th>Bruto%</th><th>Neto%</th><th>Estado</th></tr></thead><tbody>
         ${ensRows.map(r=>{ const s=semaforo(r.m,p.semVerde,p.semAmarillo);
           return `<tr${r.activo===false?' class="row-inact"':''}><td>${chkActivo(`bandejas.ensaladeras.${r.ei}`,r.activo!==false)}</td><td style="text-align:left">${r.cli}${r.cajaCli?' <span class="tag" title="el cliente pone la caja">s/caja</span>':''}</td><td><span class="chip">${r.cod}</span></td>
           <td><select class="tsel" data-path="bandejas.ensaladeras.${r.ei}.mon"><option ${r.mon==='USD'?'selected':''}>USD</option><option ${r.mon==='ARS'?'selected':''}>ARS</option></select></td>
           <td>${nInp(`bandejas.ensaladeras.${r.ei}.p.${r.cod}`,r.val,{w:84})}</td>
-          <td>${(function(){ const pr=S.bandejas.productos.find(x=>x.cod===r.cod)||{formatos:[]};
-              const sel=baFmtDe(S.bandejas.ensaladeras[r.ei],r.cod);
-              return `<select class="tsel" data-fmt="${r.ei}|${r.cod}" style="max-width:106px">
-                ${(pr.formatos||[]).map((f,k)=>`<option value="${f.u}" ${(sel!=null?+sel===+f.u:k===0)?'selected':''}>${nf(f.u)} u/caja</option>`).join('')}
-              </select>`; })()}</td>
+          <td>${(function(){ const e=S.bandejas.ensaladeras[r.ei];
+              const em=baEmpUSD(e,r.cod), fu=baFmtDe(e,r.cod);
+              return `<div style="display:flex;flex-direction:column;gap:1px;align-items:flex-end">
+                <input class="tinp ${em.manual?'emp-man':''}" type="number" step="0.01" style="max-width:76px"
+                  data-emp="${r.ei}|${r.cod}" value="${em.usd.toFixed(2)}" title="${em.manual?'cargado a mano':'sale del formato de caja'}">
+                <span class="formula" style="font-size:10px;opacity:.7">${em.manual
+                  ? `a mano · <span class="lnk" data-empauto="${r.ei}|${r.cod}">recalcular</span>`
+                  : (e.cajaCli ? 'cliente pone la caja' : `<span class="lnk" data-empfmt="${r.ei}|${r.cod}">${fu?nf(fu):'—'} u/caja ✎</span>`)}</span>
+              </div>`; })()}</td>
           <td class="num">${usd(r.precio,2)}</td><td class="num">${usd(r.costo,2)}</td>
           <td class="num">${usd(r.precio-r.costo,2)}</td><td class="num">${pct(r.mb,1)}</td><td class="num"><b>${pct(r.m,1)}</b></td>
           <td><span class="pill ${s}">${semLabel(s)}</span></td></tr>`;}).join('')}
@@ -2915,10 +2960,21 @@ function renderBandejas(){
   if($('#bHist')) $('#bHist').onclick=openBaListHistory;
   if($('#bAdd')) $('#bAdd').onclick=()=>{ S.bandejas.productos.push({cod:'NEW',linea:'Clamshell',mat:'Cristal',bruto:20,neto:16,vel:7000,otros:0.06}); commit(); renderBandejas(); };
   $$('#page-bandejas [data-fmted]').forEach(b=>b.onclick=()=>openFormatos(+b.dataset.fmted));
-  $$('#page-bandejas [data-fmt]').forEach(sl=>sl.onchange=()=>{
-    const [ei,cod]=sl.dataset.fmt.split('|'), e=S.bandejas.ensaladeras[+ei];
-    if(typeof e.fmt!=='object' || e.fmt===null) e.fmt={};
-    e.fmt[cod]=+sl.value; commit(); renderBandejas();
+  $$('#page-bandejas [data-emp]').forEach(inp=>inp.onchange=()=>{
+    const [ei,cod]=inp.dataset.emp.split('|'), e=S.bandejas.ensaladeras[+ei];
+    e.emp=e.emp||{}; const v=num(inp.value);
+    const auto=baEmpUSD({...e,emp:{}},cod).usd;
+    if(!(v>0) || Math.abs(v-auto)<0.005) delete e.emp[cod];   // vuelve al calculado
+    else e.emp[cod]=Math.round(v*100)/100;
+    commit(); renderBandejas();
+  });
+  $$('#page-bandejas [data-empauto]').forEach(b=>b.onclick=()=>{
+    const [ei,cod]=b.dataset.empauto.split('|'), e=S.bandejas.ensaladeras[+ei];
+    if(e.emp) delete e.emp[cod];
+    commit(); renderBandejas(); toast('Vuelve a calcularse desde el formato','ok');
+  });
+  $$('#page-bandejas [data-empfmt]').forEach(b=>b.onclick=()=>{
+    const [ei,cod]=b.dataset.empfmt.split('|'); openElegirFormato(+ei,cod);
   });
   $$('#page-bandejas [data-del-b]').forEach(b=>b.onclick=()=>borrarFila('bandejas',+b.dataset.delB,()=>{bExp.clear();renderBandejas();}));
   $$('#page-bandejas [data-exp]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.exp; bExp.has(i)?bExp.delete(i):bExp.add(i); renderBandejas(); });

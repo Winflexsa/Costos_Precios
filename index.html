@@ -248,6 +248,9 @@ td .formula{display:block;margin-top:3px;white-space:normal}
 /* barra de filtros */
 .filterbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto}
 .filterbar .search{margin-left:0}
+  .tinp.precio-vig{ border:1.5px solid var(--teal); background:#fff; font-weight:600; }
+  .tinp.precio-vig:focus{ box-shadow:0 0 0 3px rgba(31,143,83,.15); }
+  td.hist-cell{ text-align:right; padding-right:10px; }
 </style>
 </head>
 <body>
@@ -644,6 +647,17 @@ function migrate(){
     if(S.cfg.ganEnMargen==null) S.cfg.ganEnMargen=false;
     m=6; changed=true;
   }
+  if(m < 7){
+    // el precio anterior deja de ser un campo suelto y pasa a ser una serie con fecha
+    const seed=(o,keyAct)=>{
+      if(o.ant!=null && isFinite(o.ant) && o.ant!==0 && +o.ant!==+o[keyAct]){
+        o.hist=o.hist&&o.hist.length?o.hist:[{p:+o.ant,d:null}];
+      } else { o.hist=o.hist||[]; }
+    };
+    S.pet.clientes.forEach(c=>seed(c,'act'));
+    S.petpe.productos.forEach(p=>seed(p,'precio'));
+    m=7; changed=true;
+  }
   if(changed){ S.meta.migr=m; scheduleSave(); }
 }
 
@@ -865,6 +879,40 @@ function estadoChip(it){
   return `<span class="pill r" title="precio viejo">${it.tipo||'mov.'} · ${n}m</span>`;
 }
 
+/* ---- precio anterior: texto, no input. Con fecha y acceso a la serie ---- */
+function celdaAnterior(r,mod,i,dec){
+  const n=(r.hist||[]).length;
+  if(r.ant==null||!isFinite(r.ant)||r.ant===0)
+    return `<span class="formula" style="opacity:.55">sin registro</span>`;
+  return `<div style="line-height:1.25">
+    <span style="font-variant-numeric:tabular-nums">${usd(r.ant,dec)}</span>
+    <div class="formula" style="font-size:10px;opacity:.7">${fmtFecha(r.antD)}${n>1?` · <span class="lnk" data-hist="${mod}:${i}">${n} cambios</span>`:''}</div>
+  </div>`;
+}
+function openHistPrecio(mod,i){
+  const o = mod==='pet'?S.pet.clientes[i]:S.petpe.productos[i];
+  const nom = mod==='pet'?`${o.cli} · ${petVariantes()[o.v]?petVariantes()[o.v].nom:''}`:`${o.cli} · ${o.med}`;
+  const actual = mod==='pet'?o.act:o.precio;
+  const serie=[{p:actual,d:'hoy',cur:true}].concat(o.hist||[]);
+  const max=Math.max(...serie.map(x=>x.p))||1;
+  openModal(`
+    <div class="modal-h"><h3>↗️ Historial de precio · ${nom}</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b">
+      <table><thead><tr><th>Fecha</th><th>Precio</th><th>Variación</th><th></th></tr></thead><tbody>
+      ${serie.map((x,k)=>{ const prev=serie[k+1];
+        const d=prev?(x.p-prev.p)/prev.p:null;
+        return `<tr${x.cur?' style="background:var(--teal-l)"':''}>
+          <td style="text-align:left">${x.cur?'<b>vigente</b>':fmtFecha(x.d)}</td>
+          <td class="num"><b>${usd(x.p,3)}</b></td>
+          <td class="num" style="color:${d==null?'var(--ink2)':d>=0?'var(--green)':'var(--red)'}">${d==null?'—':(d>0?'+':'')+pct(d,1)}</td>
+          <td style="width:45%"><div style="height:8px;border-radius:4px;background:var(--teal);width:${(x.p/max*100).toFixed(0)}%;opacity:${x.cur?1:.45}"></div></td>
+        </tr>`;}).join('')}
+      </tbody></table>
+      ${serie.length>1?`<div class="note" style="margin-top:10px">Del más viejo al vigente: ${usd(serie[serie.length-1].p,3)} → ${usd(actual,3)} (<b>${(((actual/serie[serie.length-1].p)-1)*100).toFixed(1)}%</b>).</div>`:''}
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cerrar</button></div>`);
+}
+
 /* ---- deshacer: una sola marcha atras, la ultima operacion masiva ---- */
 let UNDO=null;
 function pushUndo(label){ UNDO={label,state:clone(S),at:new Date().toLocaleTimeString('es-AR')}; renderUndoBtn(); }
@@ -994,11 +1042,11 @@ function listaFilas(mod){
   if(mod==='pet'){ const vr=petVariantes();
     return S.pet.clientes.map((c,i)=>{ const r=petClientRow(c,vr);
       return {i,nom:c.cli,det:r.variante,precio:r.precio,costo:r.costo,margen:r.margenNeto,
-        activo:c.activo!==false,dec:3,net:S.pet.net,set:v=>{ S.pet.clientes[i].ant=S.pet.clientes[i].act; S.pet.clientes[i].act=v; }}; }); }
+        activo:c.activo!==false,dec:3,net:S.pet.net,set:v=>priceCommit(S.pet.clientes[i],'act',v)}; }); }
   if(mod==='petpe'){
     return S.petpe.productos.map((p,i)=>{ const r=petpeRow(p);
       return {i,nom:p.cli,det:p.med,precio:r.precio,costo:r.costo,margen:r.margenNeto,
-        activo:true,dec:3,net:S.petpe.net,set:v=>{ S.petpe.productos[i].ant=S.petpe.productos[i].precio; S.petpe.productos[i].precio=v; }}; }); }
+        activo:true,dec:3,net:S.petpe.net,set:v=>priceCommit(S.petpe.productos[i],'precio',v)}; }); }
   if(mod==='bandejas'){ const out=[];
     S.bandejas.ensaladeras.forEach((e,ei)=>{ Object.keys(e.p).forEach(cod=>{
       const precio=e.mon==='USD'?e.p[cod]:e.p[cod]/TC(), costo=bandejaCostByCod(cod,e.cajaCli,e.fmt);
@@ -1165,7 +1213,27 @@ function openPegar(mod){
 function getPath(p){ return p.split('.').reduce((o,k)=>o?.[/^\d+$/.test(k)?+k:k], S); }
 const _RANGO={merma:[0,.9],recuperacion:[0,1],cargas:[1,3],stretchPct:[0,3],pctFlete:[0,1],
   admin:[0,.5],iibb:[0,.5],dyc:[0,.5],financiero:[0,.5],ganancias:[0,.6]};
+function hoyISO(){ return new Date().toISOString().slice(0,10); }
+function fmtFecha(d){ if(!d) return 'sin fecha'; const m=/(\d{4})-(\d{2})-(\d{2})/.exec(d); return m?`${m[3]}/${m[2]}/${m[1].slice(2)}`:d; }
+
+/* Un cambio de precio se REGISTRA: archiva el valor viejo con su fecha y arma la serie.
+   Es el unico camino por el que un precio deberia cambiar. */
+function priceCommit(o,key,nuevo){
+  const viejo=o[key]; nuevo=+nuevo;
+  if(viejo==null||!isFinite(+viejo)||Math.abs(+viejo-nuevo)<1e-9){ o[key]=nuevo; return false; }
+  o.hist=o.hist||[];
+  o.hist.unshift({p:+viejo,d:hoyISO()});
+  if(o.hist.length>12) o.hist.length=12;
+  o.ant=+viejo; o.antD=hoyISO(); o[key]=nuevo;
+  return true;
+}
+/* rutas de precio: se desvian por priceCommit para que el "anterior" nunca quede desfasado */
+const _PRECIO=[[/^pet\.clientes\.(\d+)\.act$/,'pet'],[/^petpe\.productos\.(\d+)\.precio$/,'petpe']];
 function setPath(p,val){ const ks=p.split('.'); let o=S;
+  for(const [rx,mod] of _PRECIO){ const m=rx.exec(p);
+    if(m){ const arr = mod==='pet'?S.pet.clientes:S.petpe.productos;
+      if(priceCommit(arr[+m[1]],ks[ks.length-1],val)) toast('Precio actualizado · el anterior queda registrado','ok');
+      return; } }
   const _k=ks[ks.length-1], _r=_RANGO[_k];
   if(_r && typeof val==='number' && (val<_r[0]||val>_r[1])){
     toast(_k+' fuera de rango ('+_r[0]+'-'+_r[1]+'): se ignora','err'); return; }
@@ -1556,14 +1624,14 @@ function renderPET(){
           <button class="btn sm primary" id="petAdd">+ Cliente</button>
         </div></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th>Cliente</th><th>Variante</th><th>P. ant.</th><th>P. act.</th><th>Aum.</th><th>Costo</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th></tr></thead><tbody>
+        <th>Cliente</th><th>Variante</th><th>Precio anterior</th><th>Precio vigente</th><th>Variación</th><th>Costo</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th></tr></thead><tbody>
         ${filt.length?filt.map(r=>{ const s=semaforo(r.margenNeto); const ar=r.aumento;
           return `<tr>
           <td><input class="tinp" style="max-width:130px;text-align:left;font-family:'IBM Plex Sans'" data-path="pet.clientes.${r.i}.cli" value="${r.cli}"></td>
           <td><select class="tsel" data-path="pet.clientes.${r.i}.v">${opts.map(o=>`<option value="${o.v}" ${o.v==r.v?'selected':''}>${o.t}</option>`).join('')}</select></td>
-          <td>${nInp(`pet.clientes.${r.i}.ant`,r.ant,{w:78})}</td>
-          <td>${nInp(`pet.clientes.${r.i}.act`,r.act,{w:78})}</td>
-          <td class="num delta ${ar>0.0001?'up':ar<-0.0001?'down':'flat'}">${ar>0?'+':''}${pct(ar,1)}</td>
+          <td class="hist-cell">${celdaAnterior(r,'pet',r.i,2)}</td>
+          <td>${nInp(`pet.clientes.${r.i}.act`,r.act,{w:82,cls:'precio-vig'})}</td>
+          <td class="num delta ${ar>0.0001?'up':ar<-0.0001?'down':'flat'}">${r.ant&&r.ant!==r.act?`${ar>0?'+':''}${pct(ar,1)}`:'—'}${r.antD?`<div class="formula" style="font-size:10px;opacity:.7">desde ${fmtFecha(r.antD)}</div>`:''}</td>
           <td class="num">${usd(r.costo,2)}</td>
           <td class="num">${pct(r.margenBruto,1)}</td>
           <td class="num">${usd(r.netoUSD,2)}</td>
@@ -2240,15 +2308,15 @@ function renderPETPE(){
     <div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>Precios por producto / cliente</h3><button class="btn sm primary" id="ppAdd" style="margin-left:auto">+ Producto</button></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th>Cliente</th><th>Medida</th><th>Costo</th><th>P. ant.</th><th>Precio</th><th>Aum.</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th><th></th></tr></thead><tbody>
+        <th>Cliente</th><th>Medida</th><th>Costo</th><th>Precio anterior</th><th>Precio vigente</th><th>Variación</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th><th></th></tr></thead><tbody>
         ${rows.map(r=>{ const s=semaforo(r.margenNeto); const open=ppMExp.has(r.i);
           return `<tr>
           <td style="text-align:left">${r.cli}</td>
           <td class="num" style="text-align:left">${r.med}</td>
           <td class="num">${usd(r.costo,2)}</td>
-          <td>${nInp(`petpe.productos.${r.i}.ant`,r.ant||0,{w:80})}</td>
-          <td>${nInp(`petpe.productos.${r.i}.precio`,r.precio,{w:80})}</td>
-          <td class="num">${r.aumento?`<b style="color:${r.aumento>=0?'#0E7A3A':'#c0392b'}">${pct(r.aumento,1)}</b>`:'—'}</td>
+          <td class="hist-cell">${celdaAnterior(r,'petpe',r.i,2)}</td>
+          <td>${nInp(`petpe.productos.${r.i}.precio`,r.precio,{w:82,cls:'precio-vig'})}</td>
+          <td class="num">${r.aumento?`<b style="color:${r.aumento>=0?'#0E7A3A':'#c0392b'}">${pct(r.aumento,1)}</b>`:'—'}${r.antD?`<div class="formula" style="font-size:10px;opacity:.7">desde ${fmtFecha(r.antD)}</div>`:''}</td>
           <td class="num">${pct(r.margenBruto,1)}</td>
           <td class="num">${usd(r.netoUSD,2)}</td>
           <td class="num"><b>${pct(r.margenNeto,1)}</b></td>
@@ -3897,6 +3965,8 @@ function init(){
   inp.addEventListener('keydown',e=>{ if(e.key==='Enter') tryLogin(); });
   inp.focus();
   $$('#tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+  document.addEventListener('click',e=>{ const t=e.target.closest('[data-hist]');
+    if(t){ const [m,i]=t.dataset.hist.split(':'); openHistPrecio(m,+i); } });
   $('#btnUndo').onclick=doUndo; renderUndoBtn();
   $('#btnHistory').onclick=openHistory;
   $('#btnSettings').onclick=openSettings;

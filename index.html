@@ -248,6 +248,9 @@ td .formula{display:block;margin-top:3px;white-space:normal}
 /* barra de filtros */
 .filterbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto}
 .filterbar .search{margin-left:0}
+  tr.row-inact{ opacity:.5; background:repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(0,0,0,.02) 6px,rgba(0,0,0,.02) 12px); }
+  tr.row-inact .tinp{ background:#f6f6f6; }
+  .chk-act input{ width:16px;height:16px;cursor:pointer;accent-color:var(--teal); }
   .tinp.precio-vig{ border:1.5px solid var(--teal); background:#fff; font-weight:600; }
   .tinp.precio-vig:focus{ box-shadow:0 0 0 3px rgba(31,143,83,.15); }
   td.hist-cell{ text-align:right; padding-right:10px; }
@@ -350,7 +353,7 @@ function semLabel(c){return c==='v'?'Saludable':c==='a'?'Ajustado':'Crítico';}
    ============================================================ */
 const SEED = {
   meta:{ version:1, migr:0, updated:nowISO() },
-  cfg:{ ganEnMargen:false },   // Ganancias FUERA del margen: es reparto del resultado, no costo
+  cfg:{ ganEnMargen:false, verInactivos:false },   // Ganancias FUERA del margen: es reparto del resultado, no costo
   tc:{ value:1420, mode:"auto", lastFetch:null, lastSrc:"manual" },
 
   /* ---------------- FILM PE (insumo interno) ---------------- */
@@ -658,6 +661,29 @@ function migrate(){
     S.petpe.productos.forEach(p=>seed(p,'precio'));
     m=7; changed=true;
   }
+  if(m < 8){
+    // v4 duplico filas de laminado al renombrar medidas (Molinos "421x300" -> "421x300 (300MC)")
+    const norm=x=>String(x||'').replace(/\([^)]*\)/g,'').replace(/\s+/g,'').toUpperCase();
+    const vistos={}, out=[];
+    S.petpe.productos.forEach(p=>{
+      const k=norm(p.cli)+'|'+norm(p.med), prev=vistos[k];
+      if(prev===undefined){ vistos[k]=out.length; out.push(p); return; }
+      const q=out[prev];
+      // se queda la fila con la etiqueta mas descriptiva y se rescata el historial de la otra
+      const mejor = (p.med||'').length>(q.med||'').length ? p : q;
+      const otro  = mejor===p ? q : p;
+      mejor.hist = (mejor.hist&&mejor.hist.length) ? mejor.hist : (otro.hist||[]);
+      if(mejor.ant==null && otro.ant!=null){ mejor.ant=otro.ant; mejor.antD=otro.antD; }
+      if(mejor.activo==null && otro.activo!=null) mejor.activo=otro.activo;
+      out[prev]=mejor;
+    });
+    S.petpe.productos=out;
+    S.petpe.productos.forEach(p=>{ if(p.activo==null) p.activo=true; });
+    S.bandejas.ensaladeras.forEach(e=>{ if(e.activo==null) e.activo=true; });
+    if(!S.cfg) S.cfg={};
+    if(S.cfg.verInactivos==null) S.cfg.verInactivos=false;
+    m=8; changed=true;
+  }
   if(changed){ S.meta.migr=m; scheduleSave(); }
 }
 
@@ -939,16 +965,16 @@ function clientesData(){
       precio:r.precio,costo:r.costo,margen:r.margenNeto,activo:c.activo!==false,
       ult:c.ult,tipo:c.tipo,ref:{t:'pet',i:S.pet.clientes.indexOf(c)}}); });
 
-  S.petpe.productos.forEach(p=>{ const r=petpeRow(p);
+  S.petpe.productos.forEach(p=>{ if(!verInact() && !esActivo(p)) return; const r=petpeRow(p);
     push(p.cli,{mod:'Laminado',tag:'teal',det:p.med,unidad:'USD/kg',
-      precio:r.precio,costo:r.costo,margen:r.margenNeto,activo:true,
+      precio:r.precio,costo:r.costo,margen:r.margenNeto,activo:esActivo(p),
       ult:p.ult,tipo:p.tipo,revisar:!!p.revisar,ref:{t:'petpe',i:S.petpe.productos.indexOf(p)}}); });
 
-  S.bandejas.ensaladeras.forEach(e=>{ Object.entries(e.p).forEach(([cod,val])=>{
+  S.bandejas.ensaladeras.forEach(e=>{ if(!verInact() && !esActivo(e)) return; Object.entries(e.p).forEach(([cod,val])=>{
     if(val==null) return;
     const precio=e.mon==='USD'?val:val/TC(), costo=bandejaCostByCod(cod,e.cajaCli,e.fmt);
     push(e.cli,{mod:'Ensaladeras',tag:'green',det:cod+(e.cajaCli?' · s/caja':''),unidad:'USD/millar',
-      precio,costo,margen:baMargen(precio,costo).margenNeto,activo:true,
+      precio,costo,margen:baMargen(precio,costo).margenNeto,activo:esActivo(e),
       ref:{t:'bandejas',i:S.bandejas.ensaladeras.indexOf(e)}}); }); });
 
   // fusionar claves que son prefijo de otras (HUERTAS / HUERTAS DEL PILAR)
@@ -1046,12 +1072,12 @@ function listaFilas(mod){
   if(mod==='petpe'){
     return S.petpe.productos.map((p,i)=>{ const r=petpeRow(p);
       return {i,nom:p.cli,det:p.med,precio:r.precio,costo:r.costo,margen:r.margenNeto,
-        activo:true,dec:3,net:S.petpe.net,set:v=>priceCommit(S.petpe.productos[i],'precio',v)}; }); }
+        activo:esActivo(p),dec:3,net:S.petpe.net,set:v=>priceCommit(S.petpe.productos[i],'precio',v)}; }); }
   if(mod==='bandejas'){ const out=[];
     S.bandejas.ensaladeras.forEach((e,ei)=>{ Object.keys(e.p).forEach(cod=>{
       const precio=e.mon==='USD'?e.p[cod]:e.p[cod]/TC(), costo=bandejaCostByCod(cod,e.cajaCli,e.fmt);
       out.push({i:ei+'|'+cod,nom:e.cli,det:cod,precio,costo,margen:baMargen(precio,costo).margenNeto,
-        activo:true,dec:2,net:S.bandejas.net,
+        activo:esActivo(e),dec:2,net:S.bandejas.net,
         set:v=>{ S.bandejas.ensaladeras[ei].p[cod]= e.mon==='USD'? v : Math.round(v*TC()); }}); }); });
     Object.keys(S.bandejas.clamshells).forEach(cod=>{
       const precio=S.bandejas.clamshells[cod], costo=bandejaCostByCod(cod);
@@ -1213,6 +1239,15 @@ function openPegar(mod){
 function getPath(p){ return p.split('.').reduce((o,k)=>o?.[/^\d+$/.test(k)?+k:k], S); }
 const _RANGO={merma:[0,.9],recuperacion:[0,1],cargas:[1,3],stretchPct:[0,3],pctFlete:[0,1],
   admin:[0,.5],iibb:[0,.5],dyc:[0,.5],financiero:[0,.5],ganancias:[0,.6]};
+function esActivo(o){ return o.activo!==false; }
+function verInact(){ return !!(S&&S.cfg&&S.cfg.verInactivos); }
+function chkActivo(path,activo){
+  return `<label class="chk-act" title="${activo?'Activo — destildalo si dejó de comprar':'Inactivo — no entra en promedios ni semáforos'}">
+    <input type="checkbox" data-act="${path}" ${activo?'checked':''}></label>`;
+}
+function toggleInactBtn(n){
+  return `<button class="btn sm" id="btnVerInact">${verInact()?'✓ ':''}Inactivos${n?` (${n})`:''}</button>`;
+}
 function hoyISO(){ return new Date().toISOString().slice(0,10); }
 function fmtFecha(d){ if(!d) return 'sin fecha'; const m=/(\d{4})-(\d{2})-(\d{2})/.exec(d); return m?`${m[3]}/${m[2]}/${m[1].slice(2)}`:d; }
 
@@ -1286,7 +1321,7 @@ function moduleSummary(){
   const petMin=petC.reduce((m,c)=>c.margenNeto<m.margenNeto?c:m,petC[0]||{margenNeto:0});
   const petMax=petC.reduce((m,c)=>c.margenNeto>m.margenNeto?c:m,petC[0]||{margenNeto:0});
 
-  const ppRows=S.petpe.productos.map(petpeRow);
+  const ppRows=S.petpe.productos.filter(esActivo).map(petpeRow);
   const ppAvg=ppRows.reduce((a,r)=>a+r.margenNeto,0)/(ppRows.length||1);
   const ppMin=ppRows.reduce((m,r)=>r.margenNeto<m.margenNeto?r:m,ppRows[0]||{margenNeto:0});
   const ppMax=ppRows.reduce((m,r)=>r.margenNeto>m.margenNeto?r:m,ppRows[0]||{margenNeto:0});
@@ -1296,6 +1331,7 @@ function moduleSummary(){
   // bandejas: margen bruto sobre precio
   const bp=S.bandejas.params; const bRows=[];
   S.bandejas.ensaladeras.forEach(e=>{ Object.entries(e.p).forEach(([cod,val])=>{
+    if(!esActivo(e)) return;
     const precio=e.mon==='USD'?val:val/TC(); const costo=bandejaCostByCod(cod,e.cajaCli,e.fmt); const mm=baMargen(precio,costo);
     bRows.push({cli:e.cli,cod,precio,costo,mb:mm.margenBruto,m:mm.margenNeto}); }); });
   Object.entries(S.bandejas.clamshells).forEach(([cod,val])=>{ const costo=bandejaCostByCod(cod); const mm=baMargen(val,costo);
@@ -1477,7 +1513,8 @@ function petVarDetail(vi,v,proc,p,factor,tc){
 function renderPET(){
   const vr=petVariantes();
   const proc=petProc(), p=S.pet.params, n=S.pet.net, tc=TC();
-  const rows=S.pet.clientes.map((c,i)=>({...petClientRow(c,vr),i}));
+  const rows=S.pet.clientes.map((c,i)=>({...petClientRow(c,vr),i})).filter(r=>verInact()||r.activo);
+  const nInact=S.pet.clientes.filter(c=>!esActivo(c)).length;
   const sub=subTab.pet;
   S.pet.listHistory=S.pet.listHistory||[];
 
@@ -1621,12 +1658,14 @@ function renderPET(){
           <button class="btn sm" id="petReport">📋 Informe</button>
           <button class="btn sm" id="petSaveList">💾 Guardar lista</button>
           <button class="btn sm" id="petHistList">🕘 Historial</button>
+          ${toggleInactBtn(nInact)}
           <button class="btn sm primary" id="petAdd">+ Cliente</button>
         </div></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th>Cliente</th><th>Variante</th><th>Precio anterior</th><th>Precio vigente</th><th>Variación</th><th>Costo</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th></tr></thead><tbody>
+        <th title="destildar = dejó de comprar">Act.</th><th>Cliente</th><th>Variante</th><th>Precio anterior</th><th>Precio vigente</th><th>Variación</th><th>Costo</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th></tr></thead><tbody>
         ${filt.length?filt.map(r=>{ const s=semaforo(r.margenNeto); const ar=r.aumento;
-          return `<tr>
+          return `<tr${r.activo?'':' class="row-inact"'}>
+          <td>${chkActivo(`pet.clientes.${r.i}`,r.activo)}</td>
           <td><input class="tinp" style="max-width:130px;text-align:left;font-family:'IBM Plex Sans'" data-path="pet.clientes.${r.i}.cli" value="${r.cli}"></td>
           <td><select class="tsel" data-path="pet.clientes.${r.i}.v">${opts.map(o=>`<option value="${o.v}" ${o.v==r.v?'selected':''}>${o.t}</option>`).join('')}</select></td>
           <td class="hist-cell">${celdaAnterior(r,'pet',r.i,2)}</td>
@@ -1638,9 +1677,9 @@ function renderPET(){
           <td class="num"><b>${pct(r.margenNeto,1)}</b></td>
           <td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td>
           <td class="row-actions"><button class="mini-x" data-del-pet="${r.i}">✕</button></td></tr>`;}).join('')
-          :`<tr><td colspan="11" class="empty" style="padding:20px">Ningún cliente coincide con el filtro.</td></tr>`}
+          :`<tr><td colspan="12" class="empty" style="padding:20px">Ningún cliente coincide con el filtro.</td></tr>`}
       </tbody>
-      <tr class="total"><td>PROMEDIO${filtered?' (filtro)':''}</td><td></td><td></td><td class="num">${usd(avgPrecio,2)}</td><td></td>
+      <tr class="total"><td></td><td>PROMEDIO${filtered?' (filtro)':''}</td><td></td><td></td><td class="num">${usd(avgPrecio,2)}</td><td></td>
         <td class="num">${usd(avgCosto,2)}</td><td class="num">${pct(avgBruto,1)}</td><td></td><td class="num">${pct(avgNeto,1)}</td><td></td><td></td></tr>
       </table></div></div></div>
 
@@ -2186,7 +2225,9 @@ function renderPE(){
    ============================================================ */
 function renderPETPE(){
   const proc=petpeProc(), p=S.petpe.params, n=S.petpe.net, tc=TC();
-  const rows=S.petpe.productos.map((pr,i)=>({...petpeRow(pr),i}));
+  const rowsAll=S.petpe.productos.map((pr,i)=>({...petpeRow(pr),i,activo:esActivo(pr)}));
+  const rows=rowsAll.filter(r=>verInact()||r.activo);
+  const nInact=rowsAll.filter(r=>!r.activo).length;
   const cPET=petpeCostPET(), cPE=petpeCostPE();
   const sub=subTab.petpe;
 
@@ -2295,7 +2336,8 @@ function renderPETPE(){
         </div></div></div>
     </div>`;
   } else {
-    const avgNeto=rows.reduce((a,r)=>a+r.margenNeto,0)/(rows.length||1);
+    const _act=rowsAll.filter(r=>r.activo), _base=_act.length?_act:rowsAll;
+    const avgNeto=_base.reduce((a,r)=>a+r.margenNeto,0)/(_base.length||1);
     const avgBruto=rows.reduce((a,r)=>a+r.margenBruto,0)/(rows.length||1);
     body=`
     <div class="grid g4" style="margin-bottom:16px">
@@ -2306,11 +2348,12 @@ function renderPETPE(){
     </div>
 
     <div class="card" style="margin-bottom:16px">
-      <div class="card-h"><h3>Precios por producto / cliente</h3><button class="btn sm primary" id="ppAdd" style="margin-left:auto">+ Producto</button></div>
+      <div class="card-h"><h3>Precios por producto / cliente</h3><div class="filterbar" style="margin-left:auto">${toggleInactBtn(nInact)}<button class="btn sm primary" id="ppAdd">+ Producto</button></div></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th>Cliente</th><th>Medida</th><th>Costo</th><th>Precio anterior</th><th>Precio vigente</th><th>Variación</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th><th></th></tr></thead><tbody>
+        <th title="destildar = dejó de comprar">Act.</th><th>Cliente</th><th>Medida</th><th>Costo</th><th>Precio anterior</th><th>Precio vigente</th><th>Variación</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th><th></th></tr></thead><tbody>
         ${rows.map(r=>{ const s=semaforo(r.margenNeto); const open=ppMExp.has(r.i);
-          return `<tr>
+          return `<tr${r.activo?'':' class="row-inact"'}>
+          <td>${chkActivo(`petpe.productos.${r.i}`,r.activo)}</td>
           <td style="text-align:left">${r.cli}</td>
           <td class="num" style="text-align:left">${r.med}</td>
           <td class="num">${usd(r.costo,2)}</td>
@@ -2464,8 +2507,9 @@ function renderBandejas(){
     const ensRows=[];
     S.bandejas.ensaladeras.forEach((e,ei)=>{ ensCods.forEach(cod=>{
       const val=e.p[cod]; if(val==null)return;
+      if(!verInact() && !esActivo(e)) return;
       const precio=e.mon==='USD'?val:val/tc; const costo=bandejaCostByCod(cod,e.cajaCli,e.fmt); const mm=baMargen(precio,costo);
-      ensRows.push({ei,cli:e.cli,mon:e.mon,cod,val,precio,costo,cajaCli:!!e.cajaCli,fmt:e.fmt,uCaja:baFormato(S.bandejas.productos.find(x=>x.cod===cod)||{},e.fmt).u,mb:mm.margenBruto,m:mm.margenNeto}); }); });
+      ensRows.push({ei,cli:e.cli,mon:e.mon,cod,val,precio,costo,activo:esActivo(e),cajaCli:!!e.cajaCli,fmt:e.fmt,uCaja:baFormato(S.bandejas.productos.find(x=>x.cod===cod)||{},e.fmt).u,mb:mm.margenBruto,m:mm.margenNeto}); }); });
     const ensAvg=ensRows.reduce((a,r)=>a+r.m,0)/(ensRows.length||1);
     const clamRows=Object.entries(S.bandejas.clamshells).map(([cod,val])=>{
       const costo=bandejaCostByCod(cod); const mm=baMargen(val,costo); return {cod,val,costo,mb:mm.margenBruto,m:mm.margenNeto}; });
@@ -2481,9 +2525,9 @@ function renderBandejas(){
     <div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>Ensaladeras · precios por cliente</h3><span class="tag">USD/millar · Bandex en USD, resto ARS</span></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th>Cliente</th><th>Producto</th><th>Moneda</th><th>Precio orig.</th><th>u/caja</th><th>USD/millar</th><th>Costo</th><th>Margen USD</th><th>Bruto%</th><th>Neto%</th><th>Estado</th></tr></thead><tbody>
+        <th title="destildar = dejó de comprar">Act.</th><th>Cliente</th><th>Producto</th><th>Moneda</th><th>Precio orig.</th><th>u/caja</th><th>USD/millar</th><th>Costo</th><th>Margen USD</th><th>Bruto%</th><th>Neto%</th><th>Estado</th></tr></thead><tbody>
         ${ensRows.map(r=>{ const s=semaforo(r.m,p.semVerde,p.semAmarillo);
-          return `<tr><td style="text-align:left">${r.cli}${r.cajaCli?' <span class="tag" title="el cliente pone la caja">s/caja</span>':''}</td><td><span class="chip">${r.cod}</span></td>
+          return `<tr${r.activo===false?' class="row-inact"':''}><td>${chkActivo(`bandejas.ensaladeras.${r.ei}`,r.activo!==false)}</td><td style="text-align:left">${r.cli}${r.cajaCli?' <span class="tag" title="el cliente pone la caja">s/caja</span>':''}</td><td><span class="chip">${r.cod}</span></td>
           <td><select class="tsel" data-path="bandejas.ensaladeras.${r.ei}.mon"><option ${r.mon==='USD'?'selected':''}>USD</option><option ${r.mon==='ARS'?'selected':''}>ARS</option></select></td>
           <td>${nInp(`bandejas.ensaladeras.${r.ei}.p.${r.cod}`,r.val,{w:84})}</td>
           <td>${nInp(`bandejas.ensaladeras.${r.ei}.fmt`,r.fmt!=null?r.fmt:r.uCaja,{w:64})}</td>
@@ -3966,7 +4010,14 @@ function init(){
   inp.focus();
   $$('#tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
   document.addEventListener('click',e=>{ const t=e.target.closest('[data-hist]');
-    if(t){ const [m,i]=t.dataset.hist.split(':'); openHistPrecio(m,+i); } });
+    if(t){ const [m,i]=t.dataset.hist.split(':'); openHistPrecio(m,+i); }
+    if(e.target.id==='btnVerInact'){ S.cfg.verInactivos=!verInact(); commit(); renderActive(); } });
+  document.addEventListener('change',e=>{ const t=e.target;
+    if(t.dataset && t.dataset.act){
+      const o=getPath(t.dataset.act); o.activo=t.checked;
+      if(!t.checked) o.desdeInact=hoyISO(); else delete o.desdeInact;
+      commit(); renderActive();
+      toast(t.checked?'Reactivado':'Marcado inactivo · sale de promedios y semáforos','ok'); } });
   $('#btnUndo').onclick=doUndo; renderUndoBtn();
   $('#btnHistory').onclick=openHistory;
   $('#btnSettings').onclick=openSettings;

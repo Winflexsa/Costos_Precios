@@ -351,8 +351,20 @@ const pct=(v,d=1)=>((v||0)*100).toLocaleString('es-AR',{minimumFractionDigits:d,
 const today=()=>new Date().toLocaleDateString('es-AR');
 const nowISO=()=>new Date().toISOString();
 function toast(msg,type=''){const t=$('#toast');t.textContent=msg;t.className='toast show '+type;setTimeout(()=>t.className='toast',2200);}
-function semaforo(margin,green,yellow){const _s=(typeof S!=='undefined'&&S&&S.sem)?S.sem:{v:0.45,a:0.25};
+const SEM_DEF={pet:{v:0.45,a:0.25},petpe:{v:0.35,a:0.25},bandejas:{v:0.45,a:0.25}};
+function SEM(mod){ mod=mod||'pet'; const d=SEM_DEF[mod]||SEM_DEF.pet;
+  const s=(typeof S!=='undefined'&&S&&S.sem&&S.sem[mod])?S.sem[mod]:null;
+  return {v:(s&&s.v!=null)?s.v:d.v, a:(s&&s.a!=null)?s.a:d.a}; }
+/* semaforo(margen, verde, amarillo, mod): si no vienen umbrales, usa los de la línea `mod` */
+function semaforo(margin,green,yellow,mod){const _s=SEM(mod);
   return margin>=(green!=null?green:_s.v)?'v':margin>=(yellow!=null?yellow:_s.a)?'a':'r';}
+function semNote(mod){ const t=SEM(mod); return `Semáforo: 🟢 ≥ ${pct(t.v,0)} · 🟡 ${pct(t.a,0)}–${pct(t.v,0)} · 🔴 < ${pct(t.a,0)} (sobre margen operativo).`; }
+function semFields(mod,titulo){ const t=SEM(mod); return `
+      <div class="card"><div class="card-h"><h3>Umbrales del semáforo</h3><span class="tag">${titulo||mod} · sobre margen operativo</span></div>
+        <div class="card-b"><div class="params-grid">
+        ${field('sem.'+mod+'.v',(t.v*100),'Umbral verde',{type:'pctnum',unit:'%',sub:'saludable ≥'})}
+        ${field('sem.'+mod+'.a',(t.a*100),'Umbral amarillo',{type:'pctnum',unit:'%',sub:'por debajo pasa a rojo'})}
+        </div></div></div>`; }
 function semLabel(c){return c==='v'?'Saludable':c==='a'?'Ajustado':'Crítico';}
 
 /* ============================================================
@@ -738,6 +750,12 @@ function migrate(){
     S.bandejas.productos.forEach(pr=>{ if(pr.v==null) pr.v = pr.mat==='Negro'?2:0; });
     if(S.tc.usarLista==null) S.tc.usarLista=false;
     m=10; changed=true;
+  }
+  if(m < 11){
+    // semaforo por linea. Laminado arranca en 35/25 (provisorio hasta tener % de estructura)
+    const g=(S.sem&&S.sem.v!=null)?{v:S.sem.v,a:S.sem.a}:{v:0.45,a:0.25};
+    S.sem={ pet:{...g}, petpe:{v:0.35,a:0.25}, bandejas:{...g} };
+    m=11; changed=true;
   }
   if(m < 11){
     // el pallet de lamina lleva 800 kg, no 500: cambia el prorrateo del traslado y del pallet
@@ -1171,7 +1189,7 @@ function renderClientes(){
   const rows=clientesData();
   const f=cliSearch?rows.filter(r=>cliKey(r.nom).includes(cliKey(cliSearch))):rows;
   const nItems=rows.reduce((a,r)=>a+r.n,0);
-  const criticos=rows.filter(r=>r.avg<0.15).length;
+  const criticos=rows.filter(r=>r.items.some(i=>semaforo(i.margen,null,null,i.mod==='Laminado'?'petpe':i.mod==='Bandejas'?'bandejas':'pet')==='r')).length;
   const viejos=rows.filter(r=>r.antig!=null&&r.antig>6).length;
 
   const head=`<div class="section-head"><div><h2>Clientes</h2>
@@ -1183,7 +1201,7 @@ function renderClientes(){
   const body=`
   <div class="grid g4" style="margin-bottom:16px">
     <div class="card stat accent"><div class="k">Clientes</div><div class="v">${rows.length}</div><div class="d">${nItems} ítems de precio</div></div>
-    <div class="card stat"><div class="k">Margen crítico</div><div class="v" style="color:var(--red)">${criticos}</div><div class="d">clientes bajo 15% promedio</div></div>
+    <div class="card stat"><div class="k">Margen crítico</div><div class="v" style="color:var(--red)">${criticos}</div><div class="d">con algún ítem en rojo</div></div>
     <div class="card stat"><div class="k">Precios viejos</div><div class="v" style="color:var(--amber)">${viejos}</div><div class="d">sin movimiento hace +6 meses</div></div>
     <div class="card stat"><div class="k">Multilínea</div><div class="v">${rows.filter(r=>r.mods.length>1).length}</div><div class="d">compran en más de una línea</div></div>
   </div>
@@ -1192,7 +1210,7 @@ function renderClientes(){
     <div class="card-h"><h3>Cartera por cliente</h3><span class="tag">ordenado por margen, del peor al mejor</span></div>
     <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
       <th>Cliente</th><th>Líneas</th><th>Ítems</th><th>Margen operativo prom.</th><th>Peor ítem</th><th>Últ. mov.</th><th>Estado</th><th></th></tr></thead><tbody>
-      ${f.map((r,idx)=>{ const s=semaforo(r.avg); const open=cliExp.has(r.nom);
+      ${f.map((r,idx)=>{ const s=(function(){const ss=r.items.map(i=>semaforo(i.margen,null,null,i.mod==='Laminado'?'petpe':i.mod==='Bandejas'?'bandejas':'pet')); return ss.includes('r')?'r':ss.includes('a')?'a':'v';})(); const open=cliExp.has(r.nom);
         return `<tr>
         <td style="text-align:left"><b>${r.nom}</b></td>
         <td style="text-align:left">${r.mods.map(m=>`<span class="chip">${m}</span>`).join(' ')}</td>
@@ -1217,7 +1235,7 @@ function clienteDetalle(r){
   const net=NET();
   return `<div class="tbl-wrap"><table><thead><tr>
     <th>Línea</th><th>Producto</th><th>Precio</th><th>Costo</th><th>Margen $</th><th>Margen %</th><th>Precio piso</th><th>Estado</th></tr></thead><tbody>
-    ${r.items.map(i=>{ const s=semaforo(i.margen); const piso=precioPiso(i.costo,net);
+    ${r.items.map(i=>{ const s=semaforo(i.margen,null,null,i.mod==='Laminado'?'petpe':i.mod==='Bandejas'?'bandejas':'pet'); const piso=precioPiso(i.costo,net);
       const dec=i.unidad==='USD/millar'?2:3;
       return `<tr${i.activo?'':' style="opacity:.5"'}>
         <td><span class="chip ${i.tag}">${i.mod}</span></td>
@@ -1598,7 +1616,6 @@ function openPapelera(){
   });
 }
 function NET(){ return S.net || {admin:0,iibb:0,dyc:0,financiero:0,ganancias:0}; }
-function SEM(){ return S.sem || {v:0.45,a:0.25}; }
 /* TC del dia (para mostrar) vs TC operativo (el que usan costos y margenes) */
 function TCD(){ return num(S.tc.value)||1; }
 function esActivo(o){ return o.activo!==false; }
@@ -1703,8 +1720,8 @@ function moduleSummary(){
   const bMax=bRows.reduce((m,r)=>r.m>m.m?r:m,bRows[0]||{m:0});
 
   const dist=(rows,acc,sg=0.30,sa=0.15)=>{ let g=0,y=0,r=0; rows.forEach(x=>{const s=semaforo(acc(x),sg,sa); if(s==='v')g++;else if(s==='a')y++;else r++;}); return {g,y,r,n:rows.length}; };
-  const sp=SEM(), spp=SEM();
-  const petD=dist(petC,c=>c.margenNeto,sp.v,sp.a), ppD=dist(ppRows,r=>r.margenNeto,spp.v,spp.a), bD=dist(bRows,r=>r.m);
+  const sp=SEM('pet'), spp=SEM('petpe'), sb=SEM('bandejas');
+  const petD=dist(petC,c=>c.margenNeto,sp.v,sp.a), ppD=dist(ppRows,r=>r.margenNeto,spp.v,spp.a), bD=dist(bRows,r=>r.m,sb.v,sb.a);
 
   // margen operativo combinado
   const netoItems=petC.length+ppRows.length+bRows.length;
@@ -1721,16 +1738,16 @@ function moduleSummary(){
 function renderDash(){
   const d=moduleSummary();
   const alerts=[];
-  d.petC.forEach(c=>{ const s=semaforo(c.margenNeto); if(s!=='v') alerts.push({mod:'PET',item:`${c.cli} · ${c.variante}`,m:c.margenNeto,s}); });
-  d.ppRows.forEach(r=>{ const s=semaforo(r.margenNeto); if(s!=='v') alerts.push({mod:'Laminado',item:`${r.cli} · ${r.med}`,m:r.margenNeto,s}); });
-  d.bRows.forEach(r=>{ const s=semaforo(r.m,S.bandejas.params.semVerde,S.bandejas.params.semAmarillo); if(s!=='v') alerts.push({mod:'Bandejas',item:`${r.cli} · ${r.cod}`,m:r.m,s}); });
+  d.petC.forEach(c=>{ const s=semaforo(c.margenNeto,null,null,'pet'); if(s!=='v') alerts.push({mod:'PET',item:`${c.cli} · ${c.variante}`,m:c.margenNeto,s}); });
+  d.ppRows.forEach(r=>{ const s=semaforo(r.margenNeto,null,null,'petpe'); if(s!=='v') alerts.push({mod:'Laminado',item:`${r.cli} · ${r.med}`,m:r.margenNeto,s}); });
+  d.bRows.forEach(r=>{ const s=semaforo(r.m,null,null,'bandejas'); if(s!=='v') alerts.push({mod:'Bandejas',item:`${r.cli} · ${r.cod}`,m:r.m,s}); });
   alerts.sort((a,b)=>a.m-b.m);
 
   const totalItems=d.petD.n+d.ppD.n+d.bD.n;
   const totR=d.petD.r+d.ppD.r+d.bD.r, totY=d.petD.y+d.ppD.y+d.bD.y, totG=d.petD.g+d.ppD.g+d.bD.g;
   const riskN=totR+totY;
   const riskColor=totR>0?'red':totY>0?'amber':'green';
-  const ws=semaforo(d.worst.m, d.worst.mod==='Bandejas'?S.bandejas.params.semVerde:0.30, d.worst.mod==='Bandejas'?S.bandejas.params.semAmarillo:0.15);
+  const ws=semaforo(d.worst.m,null,null, d.worst.mod==='Bandejas'?'bandejas':d.worst.mod==='Laminado'?'petpe':'pet');
 
   // barra de salud por módulo
   const healthBar=(D)=>{ const tot=D.n||1; const seg=(n,c)=>n?`<div style="width:${(n/tot*100).toFixed(1)}%;background:var(--${c})" title="${n}"></div>`:'';
@@ -2038,7 +2055,7 @@ function renderPET(){
         ${thSort('margenNeto','M.Oper.%',petSort)}
         ${thSort('margenNeto','Estado',petSort)}
         <th></th></tr></thead><tbody>
-        ${filt.length?filt.map(r=>{ const s=semaforo(r.margenNeto); const ar=r.aumento;
+        ${filt.length?filt.map(r=>{ const s=semaforo(r.margenNeto,null,null,'pet'); const ar=r.aumento;
           return `<tr${r.activo?'':' class="row-inact"'}>
           <td>${chkActivo(`pet.clientes.${r.i}`,r.activo)}</td>
           <td><input class="tinp" style="max-width:130px;text-align:left;font-family:'IBM Plex Sans'" data-path="pet.clientes.${r.i}.cli" value="${r.cli}"></td>
@@ -2065,8 +2082,9 @@ function renderPET(){
         ${field('net.iibb',(n.iibb*100),'IIBB s/ventas',{type:'pctnum',unit:'%'})}
         ${field('net.dyc',(n.dyc*100),'Déb. y Créd. + otros',{type:'pctnum',unit:'%'})}
         ${field('net.financiero',(n.financiero*100),'Gastos financieros',{type:'pctnum',unit:'%'})}
-        ${field('net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%'})}
-      </div></div></div>`;
+        ${field('net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%',sub:'informativo: no se descuenta'})}
+      </div></div></div>
+      ${semFields('pet','PET lámina')}`;
   }
 
   $('#page-pet').innerHTML=head+body;
@@ -2111,7 +2129,7 @@ function petReportGroups(dim){
   const map={};
   rows.forEach(r=>{ const k=keyOf(r); (map[k]=map[k]||[]).push(r); });
   let g=Object.keys(map).map(k=>{ const arr=map[k];
-    const v=arr.filter(r=>r.margenNeto>=0.30).length, a=arr.filter(r=>r.margenNeto>=0.15&&r.margenNeto<0.30).length, rr=arr.filter(r=>r.margenNeto<0.15).length;
+    const _t=SEM('pet'); const v=arr.filter(r=>r.margenNeto>=_t.v).length, a=arr.filter(r=>r.margenNeto>=_t.a&&r.margenNeto<_t.v).length, rr=arr.filter(r=>r.margenNeto<_t.a).length;
     return { grupo:k, n:arr.length,
       precio:arr.reduce((s,r)=>s+r.precio,0)/arr.length,
       costo:arr.reduce((s,r)=>s+r.costo,0)/arr.length,
@@ -2130,13 +2148,13 @@ function openPetReport(){
   const g=petReportGroups(petReportDim);
   const vr=petVariantes(); const allRows=S.pet.clientes.map(c=>petClientRow(c,vr));
   const gAvg=allRows.reduce((s,r)=>s+r.margenNeto,0)/(allRows.length||1);
-  const enRojo=allRows.filter(r=>r.margenNeto<0.15).length;
+  const enRojo=allRows.filter(r=>r.margenNeto<SEM('pet').a).length;
   const best=g.reduce((m,x)=>x.neto>m.neto?x:m,g[0]||{grupo:'-',neto:0});
   const worst=g.reduce((m,x)=>x.neto<m.neto?x:m,g[0]||{grupo:'-',neto:0});
   const maxAbs=Math.max(0.0001,...g.map(x=>Math.abs(x.neto)));
   const barColor=s=> s==='v'?'var(--green)':s==='a'?'var(--amber)':'var(--red)';
 
-  const bars=g.map(x=>{ const s=semaforo(x.neto); const w=Math.max(3,Math.min(100,Math.abs(x.neto)/maxAbs*100)); const open=petRepExp.has(x.grupo);
+  const bars=g.map(x=>{ const s=semaforo(x.neto,null,null,'pet'); const w=Math.max(3,Math.min(100,Math.abs(x.neto)/maxAbs*100)); const open=petRepExp.has(x.grupo);
     return `<div class="repbar" data-rgrp="${encodeURIComponent(x.grupo)}" style="cursor:pointer;display:grid;grid-template-columns:170px 1fr 92px;gap:10px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--line)">
         <div style="text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>${x.grupo}</b> <span class="note">${x.n} cli</span></div>
         <div style="position:relative;height:20px;background:var(--line2);border-radius:6px;overflow:hidden">
@@ -2145,7 +2163,7 @@ function openPetReport(){
         <div style="text-align:right"><b>${pct(x.neto,1)}</b> <span class="lnk">${open?'▲':'▼'}</span></div>
       </div>
       ${open?`<div class="exp-row" style="display:block;padding:8px 6px"><div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Variante</th><th>Precio</th><th>Costo</th><th>M.Oper.%</th><th>Estado</th></tr></thead><tbody>
-        ${x.rows.slice().sort((p,q)=>p.margenNeto-q.margenNeto).map(r=>{const ss=semaforo(r.margenNeto);
+        ${x.rows.slice().sort((p,q)=>p.margenNeto-q.margenNeto).map(r=>{const ss=semaforo(r.margenNeto,null,null,'pet');
           return `<tr><td style="text-align:left">${r.cli}</td><td style="text-align:left">${r.variante}</td><td class="num">${usd(r.precio,2)}</td><td class="num">${usd(r.costo,2)}</td><td class="num"><b>${pct(r.margenNeto,1)}</b></td><td><span class="pill ${ss}">${semLabel(ss)}</span></td></tr>`;}).join('')}
       </tbody></table></div></div>`:''}`;}).join('');
 
@@ -2155,7 +2173,7 @@ function openPetReport(){
        <div class="card stat accent"><div class="card-b stat"><div class="k">Clientes</div><div class="v">${allRows.length}</div><div class="d">${g.length} ${lab.toLowerCase()}s</div></div></div>
        <div class="card stat"><div class="card-b stat"><div class="k">Margen operativo prom.</div><div class="v">${pct(gAvg,1)}</div><div class="d">global</div></div></div>
        <div class="card stat"><div class="card-b stat"><div class="k">Mejor ${lab.toLowerCase()}</div><div class="v" style="font-size:18px">${pct(best.neto,1)}</div><div class="d">${best.grupo}</div></div></div>
-       <div class="card stat"><div class="card-b stat"><div class="k">En rojo</div><div class="v">${enRojo}</div><div class="d">margen &lt; 15%</div></div></div>
+       <div class="card stat"><div class="card-b stat"><div class="k">En rojo</div><div class="v">${enRojo}</div><div class="d">margen &lt; ${pct(SEM('pet').a,0)}</div></div></div>
      </div>
      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px">
        <span class="note">Agrupar:</span>${dims.map(d=>`<button class="btn sm ${petReportDim===d[0]?'primary':''}" data-rdim="${d[0]}">${d[1]}</button>`).join('')}
@@ -2178,7 +2196,7 @@ async function exportPetReport(dim,groups){
   const H=[{t:labels[dim],k:'grupo',w:26},{t:'Ítems',k:'n',w:9,fmt:XF.int},{t:'Precio prom.',k:'precio',w:13,fmt:XF.usd2},
     {t:'Costo prom.',k:'costo',w:13,fmt:XF.usd2},{t:'Margen operativo prom.',k:'neto',w:16,fmt:XF.pct,sem:true},
     {t:'Peor',k:'peor',w:11,fmt:XF.pct},{t:'Mejor',k:'mejor',w:11,fmt:XF.pct},{t:'🟢',k:'v',w:6,fmt:XF.int},{t:'🟡',k:'a',w:6,fmt:XF.int},{t:'🔴',k:'r',w:6,fmt:XF.int}];
-  groups.forEach(x=>{ x.__sg=0.30; x.__sa=0.15; });
+  groups.forEach(x=>{ x.__sg=SEM('pet').v; x.__sa=SEM('pet').a; });
   petTitle(wb,ws,'PET Lámina · Informe por '+labels[dim],H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,groups);
   ws.views=[{state:'frozen',ySplit:4}];
   await download(wb,'Winflex_PET_informe_'+dim+'.xlsx');
@@ -2359,7 +2377,7 @@ async function petSheetVariantes(wb){
 }
 async function petSheetClientes(wb){
   const vr=petVariantes(), n=NET(), gPct=n.admin+n.iibb+n.dyc+n.financiero, ws=wb.addWorksheet('Resumen Clientes');
-  const rows=S.pet.clientes.map(c=>{ const r=petClientRow(c,vr); return {...r, gPct, ganPct:n.ganancias, gastosUSD:r.gastos, __sg:0.30, __sa:0.15}; });
+  const rows=S.pet.clientes.map(c=>{ const r=petClientRow(c,vr); return {...r, gPct, ganPct:n.ganancias, gastosUSD:r.gastos, __sg:SEM('pet').v, __sa:SEM('pet').a}; });
   const H=[{t:'Cliente',k:'cli',w:22},{t:'Variante',k:'variante',w:18},{t:'P. anterior',k:'ant',w:12,fmt:XF.usd2},
     {t:'P. actual',k:'precio',w:12,fmt:XF.usd2},{t:'Aumento',k:'aumento',w:10,fmt:XF.pct,f:R=>`IF(C${R}=0,0,(D${R}-C${R})/C${R})`},
     {t:'Costo',k:'costo',w:12,fmt:XF.usd2},{t:'M. Bruto',k:'margenBruto',w:10,fmt:XF.pct,f:R=>`IF(D${R}=0,0,(D${R}-F${R})/D${R})`},
@@ -2378,7 +2396,7 @@ async function petSheetNotas(wb){
     {n:'MP ajustada = MP base ÷ (1 − merma neta). Merma neta = merma de proceso − recuperación.'},
     {n:'Costo final por variante = MP ajustada + costo de procesamiento (con o sin traslado).'},
     {n:`Margen operativo = precio − costo − gastos sobre la venta. Ganancias NO se descuenta: es reparto del resultado, no costo de la operación. Gastos sobre venta: Admin ${pct(n.admin,1)}, IIBB ${pct(n.iibb,1)}, DyC ${pct(n.dyc,1)}, Financieros ${pct(n.financiero,1)}. Imp. Ganancias ${pct(n.ganancias,0)}.`},
-    {n:'Semáforo: 🟢 ≥ 30% · 🟡 15–30% · 🔴 < 15% (sobre margen operativo).'},
+    {n:semNote('pet')},
     {n:'Generado automáticamente desde la app de Costos & Precios de Winflex.'}
   ];
   petTitle(wb,ws,'PET Lámina · Notas',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
@@ -2734,7 +2752,7 @@ function renderPETPE(){
       <div class="card-h"><h3>Precios por producto / cliente</h3><div class="filterbar" style="margin-left:auto">${toggleInactBtn(nInact)}<button class="btn sm primary" id="ppAdd">+ Producto</button></div></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
         <th title="destildar = dejó de comprar">Act.</th><th>Cliente</th><th>Medida</th><th>Costo</th><th>Precio anterior</th><th>Precio vigente</th><th>Variación</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th><th></th></tr></thead><tbody>
-        ${rows.map(r=>{ const s=semaforo(r.margenNeto); const open=ppMExp.has(r.i);
+        ${rows.map(r=>{ const s=semaforo(r.margenNeto,null,null,'petpe'); const open=ppMExp.has(r.i);
           return `<tr${r.activo?'':' class="row-inact"'}>
           <td>${chkActivo(`petpe.productos.${r.i}`,r.activo)}</td>
           <td style="text-align:left">${r.cli}<div class="formula" style="font-size:10px;opacity:.7">${r.vPET} · ${usd(r.cPETkg,3)}/kg</div></td>
@@ -2768,10 +2786,10 @@ function renderPETPE(){
             return `<div class="card stat accent"><div class="k">Mejor margen</div><div class="v">${pct(best.margenNeto,1)}</div><div class="d">${best.cli} · ${best.med}</div></div>
             <div class="card stat"><div class="k">Peor margen</div><div class="v">${pct(worst.margenNeto,1)}</div><div class="d">${worst.cli} · ${worst.med}</div></div>
             <div class="card stat"><div class="k">Aumento prom.</div><div class="v">${pct(avgAum,1)}</div><div class="d">vs precio anterior</div></div>
-            <div class="card stat"><div class="k">En rojo</div><div class="v">${rows.filter(r=>r.margenNeto<0.15).length}</div><div class="d">margen &lt; 15%</div></div>`;})()}
+            <div class="card stat"><div class="k">En rojo</div><div class="v">${rows.filter(r=>r.margenNeto<SEM('petpe').a).length}</div><div class="d">margen &lt; ${pct(SEM('petpe').a,0)}</div></div>`;})()}
         </div>
         <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Cliente</th><th>Medida</th><th>M.Oper.%</th><th>Aum.</th><th>Estado</th></tr></thead><tbody>
-        ${[...rows].sort((a,b)=>b.margenNeto-a.margenNeto).map((r,idx)=>{ const s=semaforo(r.margenNeto);
+        ${[...rows].sort((a,b)=>b.margenNeto-a.margenNeto).map((r,idx)=>{ const s=semaforo(r.margenNeto,null,null,'petpe');
           return `<tr><td class="num">${idx+1}</td><td style="text-align:left">${r.cli}</td><td class="num" style="text-align:left">${r.med}</td><td class="num"><b>${pct(r.margenNeto,1)}</b></td><td class="num">${r.aumento?pct(r.aumento,1):'—'}</td><td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td></tr>`;}).join('')}
         </tbody></table></div>
       </div></div>
@@ -2783,8 +2801,9 @@ function renderPETPE(){
         ${field('net.iibb',(n.iibb*100),'IIBB',{type:'pctnum',unit:'%'})}
         ${field('net.dyc',(n.dyc*100),'DyC + otros',{type:'pctnum',unit:'%'})}
         ${field('net.financiero',(n.financiero*100),'Financieros',{type:'pctnum',unit:'%'})}
-        ${field('net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%'})}
-      </div></div></div>`;
+        ${field('net.ganancias',(n.ganancias*100),'Imp. Ganancias',{type:'pctnum',unit:'%',sub:'informativo: no se descuenta'})}
+      </div></div></div>
+      ${semFields('petpe','Laminado PET/PE')}`;
   }
 
   $('#page-petpe').innerHTML=head+body;
@@ -2901,7 +2920,7 @@ function renderBandejas(){
     <div class="grid g4" style="margin-bottom:16px">
       <div class="card stat accent"><div class="k">Margen operativo ensaladeras</div><div class="v">${pct(ensAvg,1)}</div><div class="d">misma base que PET y Laminado</div></div>
       <div class="card stat"><div class="k">Margen operativo clamshells</div><div class="v">${pct(clamAvg,1)}</div><div class="d">lista única blueberry</div></div>
-      <div class="card stat"><div class="k">Umbral verde</div><div class="v">${pct(p.semVerde,0)}</div><div class="d">amarillo ≥ ${pct(p.semAmarillo,0)}</div></div>
+      <div class="card stat"><div class="k">Umbral verde</div><div class="v">${pct(SEM('bandejas').v,0)}</div><div class="d">amarillo ≥ ${pct(SEM('bandejas').a,0)}</div></div>
       <div class="card stat"><div class="k">Cartera blueberry</div><div class="v">${S.bandejas.blueberry.length}</div><div class="d">clientes lista clamshell</div></div>
     </div>
 
@@ -2909,7 +2928,7 @@ function renderBandejas(){
       <div class="card-h"><h3>Ensaladeras · precios por cliente</h3><span class="tag">USD/millar · Bandex en USD, resto ARS</span></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
         <th title="destildar = dejó de comprar">Act.</th><th>Cliente</th><th>Producto</th><th>Moneda</th><th>Precio orig.</th><th title="costo de caja + pallet por millar de unidades">Empaque USD/mil</th><th>USD/millar</th><th>Costo</th><th>Margen USD</th><th>Bruto%</th><th>Neto%</th><th>Estado</th></tr></thead><tbody>
-        ${ensRows.map(r=>{ const s=semaforo(r.m,p.semVerde,p.semAmarillo);
+        ${ensRows.map(r=>{ const s=semaforo(r.m,null,null,'bandejas');
           return `<tr${r.activo===false?' class="row-inact"':''}><td>${chkActivo(`bandejas.ensaladeras.${r.ei}`,r.activo!==false)}</td><td style="text-align:left">${r.cli}${r.cajaCli?' <span class="tag" title="el cliente pone la caja">s/caja</span>':''}</td><td><span class="chip">${r.cod}</span></td>
           <td><select class="tsel" data-path="bandejas.ensaladeras.${r.ei}.mon"><option ${r.mon==='USD'?'selected':''}>USD</option><option ${r.mon==='ARS'?'selected':''}>ARS</option></select></td>
           <td>${nInp(`bandejas.ensaladeras.${r.ei}.p.${r.cod}`,r.val,{w:84})}</td>
@@ -2931,17 +2950,12 @@ function renderBandejas(){
       <div class="card">
         <div class="card-h"><h3>Clamshells · lista única</h3><span class="tag">USD/millar</span></div>
         <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Precio</th><th>Costo</th><th>Margen USD</th><th>Bruto%</th><th>Neto%</th><th>Estado</th></tr></thead><tbody>
-          ${clamRows.map(r=>{ const s=semaforo(r.m,p.semVerde,p.semAmarillo);
+          ${clamRows.map(r=>{ const s=semaforo(r.m,null,null,'bandejas');
             return `<tr><td><span class="chip teal">${r.cod}</span></td><td>${nInp(`bandejas.clamshells.${r.cod}`,r.val,{w:64})}</td>
             <td class="num">${usd(r.costo,2)}</td><td class="num">${usd(r.val-r.costo,2)}</td><td class="num">${pct(r.mb,1)}</td><td class="num"><b>${pct(r.m,1)}</b></td>
             <td><span class="pill ${s}">${semLabel(s)}</span></td></tr>`;}).join('')}
         </tbody></table></div></div></div>
-      <div class="card">
-        <div class="card-h"><h3>Umbrales del semáforo</h3></div>
-        <div class="card-b"><div class="params-grid">
-          ${field('bandejas.params.semVerde',(p.semVerde*100),'Umbral verde',{type:'pctnum',unit:'%',sub:'margen saludable ≥'})}
-          ${field('bandejas.params.semAmarillo',(p.semAmarillo*100),'Umbral amarillo',{type:'pctnum',unit:'%',sub:'por debajo pasa a rojo'})}
-        </div></div></div>
+      ${semFields('bandejas','Bandejas')}
     </div>
 
     <div class="card">
@@ -3237,7 +3251,7 @@ function dataRows(ws,start,headers,rows){
       if(h.fmt) c.numFmt=h.fmt;
       c.border=thinBorder();
       if(ri%2===1) c.fill=fill(CLR.zebra);
-      if(h.sem && val!=null){ const s=semaforo(val, rd.__sg??0.30, rd.__sa??0.15);
+      if(h.sem && val!=null){ const s=semaforo(val, rd.__sg??SEM('pet').v, rd.__sa??SEM('pet').a);
         c.fill=fill(s==='v'?CLR.green:s==='a'?CLR.yellow:CLR.red);
         c.font={name:'Arial',size:10,bold:true,color:{argb:s==='v'?CLR.greenT:s==='a'?CLR.yellowT:CLR.redT}}; }
     });
@@ -3766,7 +3780,7 @@ function ppCalcCompute(){
     totalUSD:costo*c.qty,totalARS:costo*c.tc*c.qty,arsU:costo*c.tc};
 }
 function ppCalcResultHTML(){
-  const c=ppCalc, r=ppCalcCompute(), s=semaforo(r.margenNeto);
+  const c=ppCalc, r=ppCalcCompute(), s=semaforo(r.margenNeto,null,null,'petpe');
   const bar=breakdownBar([{label:'Lámina rPET',val:r.cPET,color:'var(--teal)'},{label:'Film PE',val:r.cPE,color:'var(--amber)'},{label:'Proceso',val:r.cProc,color:'var(--blue)'}]);
   return `
   <div class="gauto" style="margin-bottom:14px">
@@ -4028,13 +4042,13 @@ async function exportBandejas(){
     {t:'USD/millar',k:'precio',w:12,fmt:XF.usd2},{t:'Costo',k:'costo',w:12,fmt:XF.usd2},{t:'Margen %',k:'m',w:11,fmt:XF.pct,sem:true}];
   const erows=[]; S.bandejas.ensaladeras.forEach(e=>Object.entries(e.p).forEach(([cod,val])=>{
     const precio=e.mon==='USD'?val:val/TC(); const costo=bandejaCostByCod(cod);
-    erows.push({cli:e.cli,cod,mon:e.mon,val,precio,costo,m:precio?(precio-costo)/precio:0,__sg:p.semVerde,__sa:p.semAmarillo}); }));
+    erows.push({cli:e.cli,cod,mon:e.mon,val,precio,costo,m:precio?(precio-costo)/precio:0,__sg:SEM('bandejas').v,__sa:SEM('bandejas').a}); }));
   addTitle(we,'Bandejas · Ensaladeras por cliente',stamp(),HE.length); setCols(we,HE); headerRow(we,4,HE); dataRows(we,5,HE,erows);
   // clamshells
   const wcl=wb.addWorksheet('Clamshells precios');
   const HL=[{t:'Producto',k:'cod',w:10},{t:'USD/millar',k:'val',w:12,fmt:XF.usd2},{t:'Costo',k:'costo',w:12,fmt:XF.usd2},{t:'Margen %',k:'m',w:11,fmt:XF.pct,sem:true}];
   const lrows=Object.entries(S.bandejas.clamshells).map(([cod,val])=>{ const costo=bandejaCostByCod(cod);
-    return {cod,val,costo,m:val?(val-costo)/val:0,__sg:p.semVerde,__sa:p.semAmarillo}; });
+    return {cod,val,costo,m:val?(val-costo)/val:0,__sg:SEM('bandejas').v,__sa:SEM('bandejas').a}; });
   addTitle(wcl,'Bandejas · Clamshells (lista única)',stamp(),HL.length); setCols(wcl,HL); headerRow(wcl,4,HL); dataRows(wcl,5,HL,lrows);
   await download(wb,'Winflex_Bandejas.xlsx');
 }
@@ -4084,7 +4098,7 @@ function baCalcCompute(){
     totalUSD:usdMillar*(c.qty/1000),totalARS:usdMillar*c.tc*(c.qty/1000),arsMillar:usdMillar*c.tc};
 }
 function baCalcResultHTML(){
-  const c=baCalc, r=baCalcCompute(), s=semaforo(r.margen,S.bandejas.params.semVerde,S.bandejas.params.semAmarillo);
+  const c=baCalc, r=baCalcCompute(), s=semaforo(r.margen,null,null,'bandejas');
   const bar=breakdownBar([{label:'MP',val:r.cMP,color:'var(--teal)'},{label:'MO',val:r.cMO,color:'var(--amber)'},
     {label:'Energía',val:r.cEner,color:'var(--blue)'},{label:'Otros',val:r.cOtros,color:'var(--muted)'}]);
   return `
@@ -4203,7 +4217,7 @@ async function baSheetParametros(wb){
     {par:'Recuperación scrap',val:p.recuperacion,u:'0-1'},{par:'Energía',val:p.energia,u:'USD/kg'},
     {par:'Salario operario',val:p.salario,u:'ARS/h'},{par:'Operarios',val:p.operarios,u:'pers'},
     {par:'Cargas sociales',val:p.cargas,u:'0-1'},{par:'MO total',val:p.salario*p.operarios*p.cargas,u:'ARS/h'},
-    {par:'Umbral verde',val:p.semVerde,u:'0-1'},{par:'Umbral amarillo',val:p.semAmarillo,u:'0-1'},{par:'Tipo de cambio',val:TC(),u:'ARS/USD'}];
+    {par:'Umbral verde',val:SEM('bandejas').v,u:'0-1'},{par:'Umbral amarillo',val:SEM('bandejas').a,u:'0-1'},{par:'Tipo de cambio',val:TC(),u:'ARS/USD'}];
   petTitle(wb,ws,'Bandejas · Parámetros del costo',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
 }
 async function baSheetEnsaladeras(wb){
@@ -4215,7 +4229,7 @@ async function baSheetEnsaladeras(wb){
     {t:'Margen %',k:'m',w:11,fmt:XF.pct,sem:true,f:R=>`IF(G${R}=0,0,(G${R}-F${R})/G${R})`}];
   const rows=[]; S.bandejas.ensaladeras.forEach(e=>Object.entries(e.p).forEach(([cod,val])=>{
     const precio=e.mon==='USD'?val:val/tc, costo=bandejaCostByCod(cod);
-    rows.push({cli:e.cli,cod,mon:e.mon,val,tc,costo,precio,mu:precio-costo,m:precio?(precio-costo)/precio:0,__sg:p.semVerde,__sa:p.semAmarillo}); }));
+    rows.push({cli:e.cli,cod,mon:e.mon,val,tc,costo,precio,mu:precio-costo,m:precio?(precio-costo)/precio:0,__sg:SEM('bandejas').v,__sa:SEM('bandejas').a}); }));
   petTitle(wb,ws,'Bandejas · Ensaladeras por cliente (con fórmulas)',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
 }
 async function baSheetClamshells(wb){
@@ -4224,7 +4238,7 @@ async function baSheetClamshells(wb){
     {t:'Margen USD',k:'mu',w:12,fmt:XF.usd2,f:R=>`B${R}-C${R}`},
     {t:'Margen %',k:'m',w:11,fmt:XF.pct,sem:true,f:R=>`IF(B${R}=0,0,(B${R}-C${R})/B${R})`}];
   const rows=Object.entries(S.bandejas.clamshells).map(([cod,val])=>{ const costo=bandejaCostByCod(cod);
-    return {cod,val,costo,mu:val-costo,m:val?(val-costo)/val:0,__sg:p.semVerde,__sa:p.semAmarillo}; });
+    return {cod,val,costo,mu:val-costo,m:val?(val-costo)/val:0,__sg:SEM('bandejas').v,__sa:SEM('bandejas').a}; });
   petTitle(wb,ws,'Bandejas · Clamshells (lista única, con fórmulas)',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);
 }
 async function baSheetNotas(wb){
@@ -4346,9 +4360,9 @@ async function exportConsolidado(){
     {t:'Costo ref. USD',k:'cost',w:14,fmt:XF.usd3},{t:'Peor ítem',k:'worst',w:26},{t:'Peor margen',k:'wm',w:12,fmt:XF.pct}];
   addTitle(ws,'Costos & Precios · Consolidado',stamp(),H.length); setCols(ws,H); headerRow(ws,4,H);
   const rows=[
-    {mod:'PET Lámina (neto)',n:d.petC.length,avg:d.petAvg,cost:d.petC.reduce((a,r)=>a+r.costo,0)/(d.petC.length||1),worst:d.petMin.cli||'-',wm:d.petMin.margenNeto||0,__sg:0.30,__sa:0.15},
-    {mod:'Laminado PET/PE (neto)',n:d.ppRows.length,avg:d.ppAvg,cost:d.ppRows.reduce((a,r)=>a+r.costo,0)/(d.ppRows.length||1),worst:d.ppMin.cli||'-',wm:d.ppMin.margenNeto||0,__sg:0.30,__sa:0.15},
-    {mod:'Bandejas (bruto)',n:d.bRows.length,avg:d.bAvg,cost:0,worst:(d.bMin.cli||'-')+' '+(d.bMin.cod||''),wm:d.bMin.m||0,__sg:S.bandejas.params.semVerde,__sa:S.bandejas.params.semAmarillo},
+    {mod:'PET Lámina (neto)',n:d.petC.length,avg:d.petAvg,cost:d.petC.reduce((a,r)=>a+r.costo,0)/(d.petC.length||1),worst:d.petMin.cli||'-',wm:d.petMin.margenNeto||0,__sg:SEM('pet').v,__sa:SEM('pet').a},
+    {mod:'Laminado PET/PE (neto)',n:d.ppRows.length,avg:d.ppAvg,cost:d.ppRows.reduce((a,r)=>a+r.costo,0)/(d.ppRows.length||1),worst:d.ppMin.cli||'-',wm:d.ppMin.margenNeto||0,__sg:SEM('petpe').v,__sa:SEM('petpe').a},
+    {mod:'Bandejas (bruto)',n:d.bRows.length,avg:d.bAvg,cost:0,worst:(d.bMin.cli||'-')+' '+(d.bMin.cod||''),wm:d.bMin.m||0,__sg:SEM('bandejas').v,__sa:SEM('bandejas').a},
     {mod:'Film PE (insumo)',n:1,avg:'',cost:d.peTot,worst:'-',wm:''}
   ];
   dataRows(ws,5,H,rows);

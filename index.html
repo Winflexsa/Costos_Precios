@@ -351,7 +351,9 @@ const pct=(v,d=1)=>((v||0)*100).toLocaleString('es-AR',{minimumFractionDigits:d,
 const today=()=>new Date().toLocaleDateString('es-AR');
 const nowISO=()=>new Date().toISOString();
 function toast(msg,type=''){const t=$('#toast');t.textContent=msg;t.className='toast show '+type;setTimeout(()=>t.className='toast',2200);}
-const SEM_DEF={pet:{v:0.45,a:0.25},petpe:{v:0.35,a:0.25},bandejas:{v:0.45,a:0.25}};
+const SEM_DEF={pet:{v:0.34,a:0.22},petpe:{v:0.34,a:0.22},bandejas:{v:0.34,a:0.22}};
+/* estructura + desvio del modelo, % sobre venta: utilidad real estimada = margen operativo - ESTR() */
+function ESTR(){ return (S&&S.cfg&&S.cfg.estructura!=null)?S.cfg.estructura:0.22; }
 function SEM(mod){ mod=mod||'pet'; const d=SEM_DEF[mod]||SEM_DEF.pet;
   const s=(typeof S!=='undefined'&&S&&S.sem&&S.sem[mod])?S.sem[mod]:null;
   return {v:(s&&s.v!=null)?s.v:d.v, a:(s&&s.a!=null)?s.a:d.a}; }
@@ -364,7 +366,10 @@ function semFields(mod,titulo){ const t=SEM(mod); return `
         <div class="card-b"><div class="params-grid">
         ${field('sem.'+mod+'.v',(t.v*100),'Umbral verde',{type:'pctnum',unit:'%',sub:'saludable ≥'})}
         ${field('sem.'+mod+'.a',(t.a*100),'Umbral amarillo',{type:'pctnum',unit:'%',sub:'por debajo pasa a rojo'})}
-        </div></div></div>`; }
+        ${field('cfg.estructura',(ESTR()*100),'Estructura + desvío',{type:'pctnum',unit:'%',sub:'común a las 3 líneas · util. real ≈ operativo − esto'})}
+        </div>
+        <div class="note" style="margin-top:8px">Calibrado con el flujo de fondos E41: margen operativo del modelo ~35% vs ganancia real 12,8%. Provisorio hasta separar estructura de desvío del modelo.</div>
+        </div></div>`; }
 function semLabel(c){return c==='v'?'Saludable':c==='a'?'Ajustado':'Crítico';}
 
 /* ============================================================
@@ -752,12 +757,6 @@ function migrate(){
     m=10; changed=true;
   }
   if(m < 11){
-    // semaforo por linea. Laminado arranca en 35/25 (provisorio hasta tener % de estructura)
-    const g=(S.sem&&S.sem.v!=null)?{v:S.sem.v,a:S.sem.a}:{v:0.45,a:0.25};
-    S.sem={ pet:{...g}, petpe:{v:0.35,a:0.25}, bandejas:{...g} };
-    m=11; changed=true;
-  }
-  if(m < 11){
     // el pallet de lamina lleva 800 kg, no 500: cambia el prorrateo del traslado y del pallet
     if(S.pet.params.palletCap===500) S.pet.params.palletCap=800;
     m=11; changed=true;
@@ -782,6 +781,15 @@ function migrate(){
       e.fmt=o;
     });
     m=13; changed=true;
+  }
+  if(m < 14){
+    // Semaforo por linea, calibrado con el flujo de fondos E41 (jul-25/jun-26):
+    // margen operativo modelo ~35% vs ganancia real 12,8% => 22 pts de estructura + desvio del modelo.
+    // rojo < 22 (no cubre estructura) · amarillo 22-34 · verde >= 34 (12%+ real)
+    S.sem={ pet:{v:0.34,a:0.22}, petpe:{v:0.34,a:0.22}, bandejas:{v:0.34,a:0.22} };
+    if(!S.cfg) S.cfg={};
+    if(S.cfg.estructura==null) S.cfg.estructura=0.22;
+    m=14; changed=true;
   }
   if(changed){ S.meta.migr=m; scheduleSave(); }
 }
@@ -2053,6 +2061,7 @@ function renderPET(){
         ${thSort('margenBruto','M.Bruto',petSort)}
         <th>M.Oper. USD</th>
         ${thSort('margenNeto','M.Oper.%',petSort)}
+        <th title="operativo − estructura">Util. real</th>
         ${thSort('margenNeto','Estado',petSort)}
         <th></th></tr></thead><tbody>
         ${filt.length?filt.map(r=>{ const s=semaforo(r.margenNeto,null,null,'pet'); const ar=r.aumento;
@@ -2067,6 +2076,7 @@ function renderPET(){
           <td class="num">${pct(r.margenBruto,1)}</td>
           <td class="num">${usd(r.netoUSD,2)}</td>
           <td class="num"><b>${pct(r.margenNeto,1)}</b></td>
+          <td class="num" style="color:${(r.margenNeto-ESTR())<0?'var(--red)':'inherit'}">${pct(r.margenNeto-ESTR(),1)}</td>
           <td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td>
           <td class="row-actions"><button class="mini-x" data-del-pet="${r.i}">✕</button></td></tr>`;}).join('')
           :`<tr><td colspan="12" class="empty" style="padding:20px">Ningún cliente coincide con el filtro.</td></tr>`}
@@ -2751,7 +2761,7 @@ function renderPETPE(){
     <div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>Precios por producto / cliente</h3><div class="filterbar" style="margin-left:auto">${toggleInactBtn(nInact)}<button class="btn sm primary" id="ppAdd">+ Producto</button></div></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th title="destildar = dejó de comprar">Act.</th><th>Cliente</th><th>Medida</th><th>Costo</th><th>Precio anterior</th><th>Precio vigente</th><th>Variación</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th>Estado</th><th></th><th></th></tr></thead><tbody>
+        <th title="destildar = dejó de comprar">Act.</th><th>Cliente</th><th>Medida</th><th>Costo</th><th>Precio anterior</th><th>Precio vigente</th><th>Variación</th><th>M.Bruto</th><th>M.Oper. USD</th><th>M.Oper.%</th><th title="operativo − estructura">Util. real</th><th>Estado</th><th></th><th></th></tr></thead><tbody>
         ${rows.map(r=>{ const s=semaforo(r.margenNeto,null,null,'petpe'); const open=ppMExp.has(r.i);
           return `<tr${r.activo?'':' class="row-inact"'}>
           <td>${chkActivo(`petpe.productos.${r.i}`,r.activo)}</td>
@@ -2764,6 +2774,7 @@ function renderPETPE(){
           <td class="num">${pct(r.margenBruto,1)}</td>
           <td class="num">${usd(r.netoUSD,2)}</td>
           <td class="num"><b>${pct(r.margenNeto,1)}</b></td>
+          <td class="num" style="color:${(r.margenNeto-ESTR())<0?'var(--red)':'inherit'}">${pct(r.margenNeto-ESTR(),1)}</td>
           <td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td>
           <td><span class="lnk" data-mexp="${r.i}">${open?'ocultar ▲':'desglose ▼'}</span></td>
           <td class="row-actions"><button class="mini-x" data-del-pp="${r.i}">✕</button></td></tr>
@@ -2788,9 +2799,9 @@ function renderPETPE(){
             <div class="card stat"><div class="k">Aumento prom.</div><div class="v">${pct(avgAum,1)}</div><div class="d">vs precio anterior</div></div>
             <div class="card stat"><div class="k">En rojo</div><div class="v">${rows.filter(r=>r.margenNeto<SEM('petpe').a).length}</div><div class="d">margen &lt; ${pct(SEM('petpe').a,0)}</div></div>`;})()}
         </div>
-        <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Cliente</th><th>Medida</th><th>M.Oper.%</th><th>Aum.</th><th>Estado</th></tr></thead><tbody>
-        ${[...rows].sort((a,b)=>b.margenNeto-a.margenNeto).map((r,idx)=>{ const s=semaforo(r.margenNeto,null,null,'petpe');
-          return `<tr><td class="num">${idx+1}</td><td style="text-align:left">${r.cli}</td><td class="num" style="text-align:left">${r.med}</td><td class="num"><b>${pct(r.margenNeto,1)}</b></td><td class="num">${r.aumento?pct(r.aumento,1):'—'}</td><td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td></tr>`;}).join('')}
+        <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Cliente</th><th>Medida</th><th>M.Oper.%</th><th title="margen operativo − estructura + desvío (${pct(ESTR(),0)})">Util. real est.</th><th>Aum.</th><th>Estado</th></tr></thead><tbody>
+        ${[...rows].sort((a,b)=>b.margenNeto-a.margenNeto).map((r,idx)=>{ const s=semaforo(r.margenNeto,null,null,'petpe'); const ur=r.margenNeto-ESTR();
+          return `<tr><td class="num">${idx+1}</td><td style="text-align:left">${r.cli}</td><td class="num" style="text-align:left">${r.med}</td><td class="num"><b>${pct(r.margenNeto,1)}</b></td><td class="num" style="color:${ur<0?'var(--red)':'inherit'}">${pct(ur,1)}</td><td class="num">${r.aumento?pct(r.aumento,1):'—'}</td><td><span class="pill ${s}">${pct(r.margenNeto,0)}</span></td></tr>`;}).join('')}
         </tbody></table></div>
       </div></div>
 

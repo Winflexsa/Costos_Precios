@@ -506,7 +506,7 @@ const SEED = {
 
   /* ---------------- BANDEJAS (termoformado) ---------------- */
   bandejas:{
-    params:{ linkPET:true, mpCristal:1.60, mpNegro:1.76, recuperacion:0.90,
+    params:{ linkPET:true, mpCristal:1.60, mpNegro:1.76, recuperacion:0.90, scrapUSD:1.00,
       salario:8000, operarios:3, cargas:1.5, energia:0.05,
       cajaARS:853, palletARS:6800, stretchARS:0, fletePallet:0, pctFlete:0,
       semVerde:0.30, semAmarillo:0.15 },
@@ -584,7 +584,7 @@ async function loadState(){
 /* Migraciones sobre datos ya guardados en la nube (el seed solo no alcanza) */
 function migrate(){
   let m = (S.meta && S.meta.migr) || 0, changed=false;
-  const M_ACTUAL = 12;
+  const M_ACTUAL = 15;
   if(m < M_ACTUAL){
     // foto de los precios ANTES de tocar nada: queda en el historial de listas
     try{
@@ -777,6 +777,11 @@ function migrate(){
       e.fmt=o;
     });
     m=13; changed=true;
+  }
+  if(m < 15){
+    // el scrap recuperado de termoformado deja de valuarse al precio de lamina: vuelve como rPET a 1 USD/kg
+    if(S.bandejas.params.scrapUSD==null) S.bandejas.params.scrapUSD=1.00;
+    m=15; changed=true;
   }
   if(m < 14){
     // Semaforo por linea, calibrado con el flujo de fondos E41 (jul-25/jun-26):
@@ -1001,7 +1006,9 @@ function bandejaCost(prod,sinCaja,fmtU,empU){
   const desp=prod.bruto-prod.neto;
   const mpUtil=(prod.neto+desp*(1-p.recuperacion))/1000;
   const precioMP=baPrecioLamina(prod);
-  const cMP=mpUtil*precioMP, cMO=(MOh/prod.vel)/tc, cEner=mpUtil*p.energia, cOtros=mpUtil*prod.otros;
+  // scrap recuperado: se compra lamina por el bruto y se recupera desp×recup a valor scrap (rPET), no a precio de lamina
+  const kgRecup=desp*p.recuperacion/1000, cScrap=kgRecup*(precioMP-(p.scrapUSD||0));
+  const cMP=mpUtil*precioMP+cScrap, cMO=(MOh/prod.vel)/tc, cEner=mpUtil*p.energia, cOtros=mpUtil*prod.otros;
   // --- empaque: formato de caja + quien la pone (depende del CANAL) ---
   const F=baFormato(prod,fmtU), uCaja=F.u||1, uPall=F.up||1;
   const cCaja=sinCaja?0:(p.cajaARS/uCaja)/tc;
@@ -1011,7 +1018,7 @@ function bandejaCost(prod,sinCaja,fmtU,empU){
   const manual = (empU!=null && isFinite(empU));
   const cEmpaque = manual ? empU/1000 : (cCaja+cPallet+cFlete);
   const totalU=cMP+cMO+cEner+cOtros+cEmpaque;
-  return {desp,mpUtil,uCaja,uPall,sinCaja,empManual:manual,cMP,cMO,cEner,cOtros,cCaja,cPallet,cFlete,cEmpaque,totalU,usdMillar:totalU*1000};
+  return {desp,mpUtil,kgRecup,cScrap,precioMP,uCaja,uPall,sinCaja,empManual:manual,cMP,cMO,cEner,cOtros,cCaja,cPallet,cFlete,cEmpaque,totalU,usdMillar:totalU*1000};
 }
 /* margen de bandejas en la MISMA base que PET y Laminado */
 function baMargen(precio,costo){
@@ -2025,7 +2032,7 @@ function renderPET(){
     const filtered=(petSearch||petFilter.mat||petFilter.col);
     body=`
     <div class="grid g4" style="margin-bottom:16px">
-      <div class="card stat accent"><div class="k">Margen operativo prom.${filtered?' (filtro)':''}</div><div class="v">${pct(avgNeto,1)}</div><div class="d">después de gastos + Ganancias</div></div>
+      <div class="card stat accent"><div class="k">Margen operativo prom.${filtered?' (filtro)':''}</div><div class="v">${pct(avgNeto,1)}</div><div class="d">después de gastos sobre la venta</div></div>
       <div class="card stat"><div class="k">Margen bruto prom.</div><div class="v">${pct(avgBruto,1)}</div><div class="d">precio − costo</div></div>
       <div class="card stat"><div class="k">Precio prom.</div><div class="v">${usd(avgPrecio,2)}<small>/kg</small></div><div class="d">${filtered?filt.length+' de '+rows.length+' clientes':'lista vigente'}</div></div>
       <div class="card stat"><div class="k">Costo prom.</div><div class="v">${usd(avgCosto,2)}<small>/kg</small></div><div class="d">según variante</div></div>
@@ -2881,6 +2888,7 @@ function renderBandejas(){
         ${field('bandejas.params.mpCristal',p.mpCristal,'MP rPET Cristal',{unit:'USD/kg',sub:'costo interno de planta'})}
         ${field('bandejas.params.mpNegro',p.mpNegro,'MP rPET Negro',{unit:'USD/kg'})}
         ${field('bandejas.params.recuperacion',(p.recuperacion*100),'Recuperación scrap',{type:'pctnum',unit:'%'})}
+        ${field('bandejas.params.scrapUSD',p.scrapUSD,'Valor del scrap',{unit:'USD/kg',sub:'lo recuperado vuelve como rPET a este valor, no a precio de lámina'})}
         ${field('bandejas.params.energia',p.energia,'Energía',{unit:'USD/kg'})}
         ${field('bandejas.params.salario',p.salario,'Salario operario',{unit:'ARS/h'})}
         ${field('bandejas.params.operarios',p.operarios,'Operarios',{unit:'pers'})}
@@ -3014,27 +3022,32 @@ function clone(o){ return JSON.parse(JSON.stringify(o)); }
 
 function summarize(mod){
   if(mod==='pe'){ const c=calcPE().total; return {cost:c,margin:null,unit:'/kg'}; }
-  if(mod==='pet'){ const vr=petVariantes(); const rows=S.pet.clientes.map(c=>petClientRow(c,vr));
+  if(mod==='pet'){ const vr=petVariantes(); const rows=S.pet.clientes.filter(esActivo).map(c=>petClientRow(c,vr));
     return {cost:rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1), margin:rows.reduce((a,r)=>a+r.margenNeto,0)/(rows.length||1), unit:'/kg'}; }
-  if(mod==='petpe'){ const rows=S.petpe.productos.map(petpeRow);
+  if(mod==='petpe'){ const rows=S.petpe.productos.filter(esActivo).map(petpeRow);
     return {cost:rows.reduce((a,r)=>a+r.costo,0)/(rows.length||1), margin:rows.reduce((a,r)=>a+r.margenNeto,0)/(rows.length||1), unit:'/kg'}; }
   if(mod==='bandejas'){ const p=S.bandejas.params; const prods=S.bandejas.productos.map(bandejaCost);
     const cost=prods.reduce((a,r)=>a+r.usdMillar,0)/(prods.length||1);
-    const ms=[]; S.bandejas.ensaladeras.forEach(e=>Object.entries(e.p).forEach(([cod,v])=>{const pr=e.mon==='USD'?v:v/TC();const co=bandejaCostByCod(cod);ms.push(pr?(pr-co)/pr:0);}));
-    Object.entries(S.bandejas.clamshells).forEach(([cod,v])=>{const co=bandejaCostByCod(cod);ms.push(v?(v-co)/v:0);});
+    const ms=[]; S.bandejas.ensaladeras.filter(esActivo).forEach(e=>Object.entries(e.p).forEach(([cod,v])=>{const pr=e.mon==='USD'?v:v/TC();const co=bandejaCostByCod(cod,e.cajaCli,baFmtDe(e,cod),baEmpDe(e,cod));ms.push(baMargen(pr,co).margenNeto);}));
+    Object.entries(S.bandejas.clamshells).forEach(([cod,v])=>{const co=bandejaCostByCod(cod);ms.push(baMargen(v,co).margenNeto);});
     return {cost,margin:ms.reduce((a,x)=>a+x,0)/(ms.length||1),unit:'/millar'}; }
 }
 function applyScenario(cl,mod,mpM,prM){
   if(mod==='pe') cl.pe.insumos.forEach(i=>i.usd*=mpM);
   if(mod==='pet'){ cl.pet.insumos.forEach(i=>i.usd*=mpM); cl.pet.clientes.forEach(c=>c.act*=prM); }
-  if(mod==='petpe'){ cl.petpe.params.costoLaminaPET*=mpM; cl.petpe.params.costoLaminaPE*=mpM; cl.petpe.productos.forEach(p=>p.precio*=prM); }
+  if(mod==='petpe'){ cl.petpe.params.costoLaminaPET*=mpM; cl.petpe.params.costoLaminaPE*=mpM;
+    // si el costo de laminas esta vinculado a los modulos PET / PE, el shock se aplica a sus insumos
+    if(cl.petpe.params.linkPET) cl.pet.insumos.forEach(i=>i.usd*=mpM);
+    if(cl.petpe.params.linkPE) cl.pe.insumos.forEach(i=>i.usd*=mpM);
+    cl.petpe.productos.forEach(p=>p.precio*=prM); }
   if(mod==='bandejas'){ cl.bandejas.params.mpCristal*=mpM; cl.bandejas.params.mpNegro*=mpM;
+    if(cl.bandejas.params.linkPET!==false) cl.pet.insumos.forEach(i=>i.usd*=mpM);
     cl.bandejas.ensaladeras.forEach(e=>{for(const k in e.p)e.p[k]*=prM;}); for(const k in cl.bandejas.clamshells)cl.bandejas.clamshells[k]*=prM; }
 }
 function scenarioResult(mod,mpPct,prPct,tcVal){
   const orig=S; const cl=clone(orig);
   applyScenario(cl,mod,1+mpPct/100,1+prPct/100);
-  cl.tc.value=tcVal;
+  cl.tc.value=tcVal; if(cl.tc.usarLista) cl.tc.lista=tcVal;
   S=cl; const scen=summarize(mod); S=orig;
   return scen;
 }
@@ -3054,7 +3067,7 @@ function openSim(mod){
         <div class="card"><div class="card-b stat"><div class="k">Costo promedio</div>
           <div class="v" id="rCost">${usd(base.cost,m.unit==='/millar'?2:3)}<small>${base.unit}</small></div>
           <div class="d" id="rCostD">sin cambios</div></div></div>
-        <div class="card"><div class="card-b stat"><div class="k">Margen ${mod==='bandejas'?'bruto':mod==='pe'?'—':'neto'} prom.</div>
+        <div class="card"><div class="card-b stat"><div class="k">Margen ${mod==='pe'?'—':'operativo'} prom.</div>
           <div class="v" id="rMar">${base.margin!=null?pct(base.margin,1):'—'}</div>
           <div class="d" id="rMarD">sin cambios</div></div></div>
       </div>
@@ -3603,7 +3616,7 @@ function ppMarginDetail(r,n){
     <tr><td style="text-align:left">− Costo del producto</td><td class="num">−${usd(r.costo,3)}</td><td></td></tr>
     <tr class="total"><td style="text-align:left">= Margen bruto</td><td class="num"><b>${usd(r.precio-r.costo,3)}</b></td><td class="num">${pct(r.margenBruto,1)}</td></tr>
     <tr><td style="text-align:left">− Gastos comerciales<span class="formula">admin ${pct(n.admin,1)} + IIBB ${pct(n.iibb,1)} + DyC ${pct(n.dyc,1)} + financ. ${pct(n.financiero,1)} = ${pct(gastosPct,1)} sobre precio</span></td><td class="num">−${usd(r.gastos,3)}</td><td></td></tr>
-    <tr><td style="text-align:left">− Impuesto a las ganancias<span class="formula">${pct(n.ganancias,0)} sobre (precio − costo − gastos)</span></td><td class="num">−${usd(r.gan,3)}</td><td></td></tr>
+    ${GAN_EN_MARGEN()?`<tr><td style="text-align:left">− Impuesto a las ganancias<span class="formula">${pct(n.ganancias,0)} sobre (precio − costo − gastos)</span></td><td class="num">−${usd(r.gan,3)}</td><td></td></tr>`:''}
     <tr class="total" style="background:var(--teal-l)"><td style="text-align:left">= Margen operativo</td><td class="num"><b>${usd(r.netoUSD,3)}</b></td><td class="num"><b>${pct(r.margenNeto,1)}</b></td></tr>
     <tr><td style="text-align:left" class="formula" colspan="3">Margen operativo % = margen operativo USD ${usd(r.netoUSD,3)} ÷ precio ${usd(r.precio,2)} = ${pct(r.margenNeto,1)}</td></tr>
   </tbody></table></div>`;
@@ -3777,8 +3790,8 @@ function ppCalcCompute(){
   const cPET=kgPET*c.cPET, cPE=kgPE*c.cPE, cProc=kgTot*c.proc, costo=cPET+cPE+cProc;
   const margenBruto=c.precio?(c.precio-costo)/c.precio:0;
   const gastos=c.precio*(n.admin+n.iibb+n.dyc+n.financiero);
-  const preGan=c.precio-costo-gastos, gan=Math.max(0,preGan*n.ganancias);
-  const netoUSD=preGan-gan, margenNeto=c.precio?netoUSD/c.precio:0;
+  const preGan=c.precio-costo-gastos, gan=Math.max(0,preGan*n.ganancias);   // se informa, no se descuenta
+  const netoUSD=preGan-(GAN_EN_MARGEN()?gan:0), margenNeto=c.precio?netoUSD/c.precio:0;
   return {yPET,yPE,gPET,gPE,pPET,pPE,kgPET,kgPE,kgTot,cPET,cPE,cProc,costo,margenBruto,netoUSD,margenNeto,
     totalUSD:costo*c.qty,totalARS:costo*c.tc*c.qty,arsU:costo*c.tc};
 }
@@ -4061,17 +4074,17 @@ let baCalc=null;
 
 /* desglose de costo por producto (dos sub-tablas, estilo PET/PE) */
 function baProductDetail(r,p,tc){
-  const precioMP=r.mat==='Negro'?p.mpNegro:p.mpCristal, MOh=p.salario*p.operarios*p.cargas;
+  const precioMP=r.precioMP!=null?r.precioMP:baPrecioLamina(r), MOh=p.salario*p.operarios*p.cargas;
   const geo=`<div class="tbl-wrap"><table><thead><tr><th>Geometría y material</th><th>Cálculo</th><th>Valor</th></tr></thead><tbody>
     <tr><td style="text-align:left">Peso bruto</td><td class="formula" style="text-align:left">gramaje de lámina</td><td class="num">${r.bruto.toFixed(2)} g</td></tr>
     <tr><td style="text-align:left">Peso neto</td><td class="formula" style="text-align:left">pieza terminada</td><td class="num">${r.neto.toFixed(2)} g</td></tr>
     <tr><td style="text-align:left">Desperdicio</td><td class="formula" style="text-align:left">bruto − neto</td><td class="num">${r.desp.toFixed(2)} g</td></tr>
-    <tr><td style="text-align:left">Recuperación scrap</td><td class="formula" style="text-align:left">se reinyecta</td><td class="num">${pct(p.recuperacion,0)}</td></tr>
+    <tr><td style="text-align:left">Recuperación scrap</td><td class="formula" style="text-align:left">vuelve como rPET a ${usd(p.scrapUSD||0,2)}/kg</td><td class="num">${pct(p.recuperacion,0)}</td></tr>
     <tr><td style="text-align:left">MP utilizada</td><td class="formula" style="text-align:left">neto + desp×(1−recup)</td><td class="num">${(r.mpUtil*1000).toFixed(2)} g/u</td></tr>
     <tr class="total"><td style="text-align:left">MP utilizada</td><td></td><td class="num">${r.mpUtil.toFixed(5)} kg/u</td></tr>
   </tbody></table></div>`;
   const cost=`<div class="tbl-wrap"><table><thead><tr><th>Armado del costo por unidad</th><th>Cálculo</th><th>USD/u</th><th>ARS/u</th></tr></thead><tbody>
-    <tr><td style="text-align:left">Materia prima</td><td class="formula" style="text-align:left">${r.mpUtil.toFixed(5)} kg × ${usd(precioMP,2)}</td><td class="num">${usd(r.cMP,5)}</td><td class="num">${ars(r.cMP*tc)}</td></tr>
+    <tr><td style="text-align:left">Materia prima</td><td class="formula" style="text-align:left">${(r.bruto/1000).toFixed(5)} kg bruto × ${usd(precioMP,2)} − ${(r.kgRecup||0).toFixed(5)} kg scrap × ${usd(p.scrapUSD||0,2)}</td><td class="num">${usd(r.cMP,5)}</td><td class="num">${ars(r.cMP*tc)}</td></tr>
     <tr><td style="text-align:left">Mano de obra</td><td class="formula" style="text-align:left">$${nf(MOh)}/h ÷ ${nf(r.vel)} u/h ÷ TC</td><td class="num">${usd(r.cMO,5)}</td><td class="num">${ars(r.cMO*tc)}</td></tr>
     <tr><td style="text-align:left">Energía</td><td class="formula" style="text-align:left">MP util × ${usd(p.energia,2)}</td><td class="num">${usd(r.cEner,5)}</td><td class="num">${ars(r.cEner*tc)}</td></tr>
     <tr><td style="text-align:left">Otros</td><td class="formula" style="text-align:left">MP util × ${usd(r.otros,2)}</td><td class="num">${usd(r.cOtros,5)}</td><td class="num">${ars(r.cOtros*tc)}</td></tr>
@@ -4088,16 +4101,17 @@ function baProductDetail(r,p,tc){
 function baCalcDefaults(){
   const pr=S.bandejas.productos[0]||{cod:'F40',mat:'Cristal',bruto:15.6,neto:12,vel:7000,otros:0.05}, p=S.bandejas.params;
   baCalc={ nombre:'', cod:pr.cod, mat:pr.mat, bruto:pr.bruto, neto:pr.neto, vel:pr.vel, otros:pr.otros,
-    mpCristal:p.mpCristal, mpNegro:p.mpNegro, recuperacion:p.recuperacion, energia:p.energia,
+    mpCristal:p.mpCristal, mpNegro:p.mpNegro, recuperacion:p.recuperacion, scrapUSD:p.scrapUSD||0, energia:p.energia,
     MOh:Math.round(p.salario*p.operarios*p.cargas), tc:Math.round(TC()), precio:0, qty:1000 };
 }
 function baCalcCompute(){
   const c=baCalc, desp=c.bruto-c.neto, mpUtil=(c.neto+desp*(1-c.recuperacion))/1000;
   const precioMP=c.mat==='Negro'?c.mpNegro:c.mpCristal;
-  const cMP=mpUtil*precioMP, cMO=(c.MOh/(c.vel||1))/(c.tc||1), cEner=mpUtil*c.energia, cOtros=mpUtil*c.otros;
+  const kgRecup=desp*c.recuperacion/1000, cScrap=kgRecup*(precioMP-(c.scrapUSD||0));
+  const cMP=mpUtil*precioMP+cScrap, cMO=(c.MOh/(c.vel||1))/(c.tc||1), cEner=mpUtil*c.energia, cOtros=mpUtil*c.otros;
   const totalU=cMP+cMO+cEner+cOtros, usdMillar=totalU*1000;
   const margen=c.precio?(c.precio-usdMillar)/c.precio:0;
-  return {desp,mpUtil,precioMP,cMP,cMO,cEner,cOtros,totalU,usdMillar,margen,
+  return {desp,mpUtil,kgRecup,cScrap,precioMP,cMP,cMO,cEner,cOtros,totalU,usdMillar,margen,
     totalUSD:usdMillar*(c.qty/1000),totalARS:usdMillar*c.tc*(c.qty/1000),arsMillar:usdMillar*c.tc};
 }
 function baCalcResultHTML(){
@@ -4138,6 +4152,7 @@ function openBaCalc(){
            ${f('bac_vel','Velocidad','u/h',baCalc.vel)}
            ${f('bac_otros','Otros','USD/kg',baCalc.otros,true)}
            ${f('bac_recup','Recuperación','0-1',baCalc.recuperacion,true)}
+           ${f('bac_scrap','Valor scrap','USD/kg',baCalc.scrapUSD,true)}
          </div></div></div>
        <div class="card"><div class="card-h"><h3>Planta y escenario</h3></div>
          <div class="card-b"><div style="display:grid;gap:10px">
@@ -4155,7 +4170,7 @@ function openBaCalc(){
    <div class="modal-foot"><button class="btn" id="baCalcExport">⬇ Exportar cálculo (Excel)</button><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`,true);
   function readAndRender(){
     baCalc.nombre=$('#bac_nombre').value; baCalc.mat=$('#bac_mat').value; baCalc.bruto=num($('#bac_bruto').value); baCalc.neto=num($('#bac_neto').value);
-    baCalc.vel=num($('#bac_vel').value); baCalc.otros=num($('#bac_otros').value); baCalc.recuperacion=num($('#bac_recup').value);
+    baCalc.vel=num($('#bac_vel').value); baCalc.otros=num($('#bac_otros').value); baCalc.recuperacion=num($('#bac_recup').value); baCalc.scrapUSD=num($('#bac_scrap').value);
     baCalc.mpCristal=num($('#bac_mpC').value); baCalc.mpNegro=num($('#bac_mpN').value); baCalc.energia=num($('#bac_ener').value);
     baCalc.MOh=num($('#bac_moh').value); baCalc.tc=num($('#bac_tc').value)||TC(); baCalc.precio=num($('#bac_precio').value); baCalc.qty=num($('#bac_qty').value);
     $('#baCalcResult').innerHTML=baCalcResultHTML();
@@ -4175,7 +4190,7 @@ async function exportBaCalc(){
     {k:'Material',v:c.mat,d:'MP '+usd(r.precioMP,2)+'/kg'},
     {k:'Peso bruto / neto',v:c.bruto,d:c.neto+' g neto · desp '+r.desp.toFixed(2)+' g'},
     {k:'MP utilizada',v:r.mpUtil,d:(r.mpUtil*1000).toFixed(2)+' g/u (recup '+pct(c.recuperacion,0)+')'},
-    {k:'Costo MP / u',v:r.cMP,d:r.mpUtil.toFixed(5)+' kg × '+usd(r.precioMP,2)},
+    {k:'Costo MP / u',v:r.cMP,d:(c.bruto/1000).toFixed(5)+' kg × '+usd(r.precioMP,2)+' − '+r.kgRecup.toFixed(5)+' kg scrap × '+usd(c.scrapUSD||0,2)},
     {k:'Costo MO / u',v:r.cMO,d:'$'+nf(c.MOh)+'/h ÷ '+nf(c.vel)+' u/h ÷ TC '+ars(c.tc)},
     {k:'Energía / u',v:r.cEner,d:'MP × '+usd(c.energia,2)},
     {k:'Otros / u',v:r.cOtros,d:'MP × '+usd(c.otros,2)},
@@ -4217,7 +4232,7 @@ async function baSheetParametros(wb){
   const p=S.bandejas.params, ws=wb.addWorksheet('Parámetros');
   const H=[{t:'Parámetro',k:'par',w:28},{t:'Valor',k:'val',w:14},{t:'Unidad',k:'u',w:14}];
   const rows=[{par:'MP rPET Cristal',val:p.mpCristal,u:'USD/kg'},{par:'MP rPET Negro',val:p.mpNegro,u:'USD/kg'},
-    {par:'Recuperación scrap',val:p.recuperacion,u:'0-1'},{par:'Energía',val:p.energia,u:'USD/kg'},
+    {par:'Recuperación scrap',val:p.recuperacion,u:'0-1'},{par:'Valor del scrap',val:p.scrapUSD||0,u:'USD/kg'},{par:'Energía',val:p.energia,u:'USD/kg'},
     {par:'Salario operario',val:p.salario,u:'ARS/h'},{par:'Operarios',val:p.operarios,u:'pers'},
     {par:'Cargas sociales',val:p.cargas,u:'0-1'},{par:'MO total',val:p.salario*p.operarios*p.cargas,u:'ARS/h'},
     {par:'Umbral verde',val:SEM('bandejas').v,u:'0-1'},{par:'Umbral amarillo',val:SEM('bandejas').a,u:'0-1'},{par:'Tipo de cambio',val:TC(),u:'ARS/USD'}];
@@ -4247,10 +4262,10 @@ async function baSheetClamshells(wb){
 async function baSheetNotas(wb){
   const ws=wb.addWorksheet('Notas');
   const H=[{t:'Nota',k:'n',w:90}];
-  const rows=[{n:'Bandejas muestra MARGEN BRUTO sobre precio (no descuenta gastos comerciales ni Ganancias).'},
-    {n:'MP utilizada = (neto + desperdicio×(1−recuperación)) ÷ 1000. El scrap recuperado se reinyecta.'},
+  const rows=[{n:'Margen operativo = (precio − costo − gastos sobre la venta) ÷ precio, misma base que PET y Laminado. Ganancias se informa aparte, no se descuenta.'},
+    {n:'Costo MP = bruto × precio lámina − desperdicio × recuperación × valor del scrap. El scrap recuperado vuelve como rPET al valor del scrap (no a precio de lámina).'},
     {n:'Energía y Otros se aplican sobre la MP utilizada, no sobre el peso bruto.'},
-    {n:'MO por unidad = (salario × operarios × (1+cargas)) ÷ velocidad ÷ TC.'},
+    {n:'MO por unidad = (salario × operarios × cargas) ÷ velocidad ÷ TC. Cargas es multiplicador (1,5 = 50% de cargas sociales).'},
     {n:'Ensaladeras: Bandex en USD, resto en ARS convertido a USD/millar al TC vigente. Clamshells: lista única blueberry.'},
     {n:'Semáforo: verde ≥ umbral verde; amarillo ≥ umbral amarillo; rojo por debajo.'}];
   petTitle(wb,ws,'Bandejas · Notas y supuestos',H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,rows);

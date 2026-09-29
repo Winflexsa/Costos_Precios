@@ -732,7 +732,7 @@ async function loadState(){
 /* Migraciones sobre datos ya guardados en la nube (el seed solo no alcanza) */
 function migrate(){
   let m = (S.meta && S.meta.migr) || 0, changed=false;
-  const M_ACTUAL = 15;
+  const M_ACTUAL = 16;
   if(m < M_ACTUAL){
     // foto de los precios ANTES de tocar nada: queda en el historial de listas
     try{
@@ -938,6 +938,12 @@ function migrate(){
     S.sem={ pet:{v:0.34,a:0.22}, petpe:{v:0.34,a:0.22}, bandejas:{v:0.34,a:0.22} };
     if(!S.cfg) S.cfg={};
     m=14; changed=true;
+  }
+  if(m < 16){
+    // criterio sep-2026: Ganancias (35%) es solo informativo, nunca se descuenta del margen en ninguna linea
+    if(!S.cfg) S.cfg={};
+    S.cfg.ganEnMargen=false;
+    m=16; changed=true;
   }
   if(changed){ S.meta.migr=m; scheduleSave(); }
 }

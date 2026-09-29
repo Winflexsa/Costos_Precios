@@ -732,7 +732,7 @@ async function loadState(){
 /* Migraciones sobre datos ya guardados en la nube (el seed solo no alcanza) */
 function migrate(){
   let m = (S.meta && S.meta.migr) || 0, changed=false;
-  const M_ACTUAL = 16;
+  const M_ACTUAL = 17;
   if(m < M_ACTUAL){
     // foto de los precios ANTES de tocar nada: queda en el historial de listas
     try{
@@ -944,6 +944,17 @@ function migrate(){
     if(!S.cfg) S.cfg={};
     S.cfg.ganEnMargen=false;
     m=16; changed=true;
+  }
+  if(m < 17){
+    // precio de caja por formato (sep-2026): Cartocor Fruitpack $2.812,57 = clamshells, E900/E910 x500, T900 x1000;
+    // E900/E910 x300 $1.084,14; T900 x300 $620,82. Formatos sin precio propio usan el general.
+    const FRUIT=2812.57, MAPA={E900:{300:1084.14,500:FRUIT},E910:{300:1084.14,500:FRUIT},T900:{300:620.82,1000:FRUIT}};
+    (S.bandejas.productos||[]).forEach(pr=>{ (pr.formatos||[]).forEach(f=>{
+      if(f.caja!=null) return;
+      if(pr.linea==='Clamshell') f.caja=FRUIT;
+      else if(MAPA[pr.cod]&&MAPA[pr.cod][+f.u]) f.caja=MAPA[pr.cod][+f.u];
+    }); });
+    m=17; changed=true;
   }
   if(changed){ S.meta.migr=m; scheduleSave(); }
 }
@@ -1178,14 +1189,15 @@ function bandejaCost(prod,sinCaja,fmtU,empU){
   const cMP=mpUtil*precioMP+cScrap, cMO=(MOh/prod.vel)/tc, cEner=mpUtil*p.energia, cOtros=mpUtil*prod.otros;
   // --- empaque: formato de caja + quien la pone (depende del CANAL) ---
   const F=baFormato(prod,fmtU), uCaja=F.u||1, uPall=F.up||1;
-  const cCaja=sinCaja?0:(p.cajaARS/uCaja)/tc;
+  const precioCaja=(+F.caja>0)?+F.caja:p.cajaARS;       // precio propio del formato; si no tiene, el general
+  const cCaja=sinCaja?0:(precioCaja/uCaja)/tc;
   const cPallet=((p.palletARS+p.stretchARS)/uPall)/tc;
   const cFlete=((p.fletePallet*p.pctFlete)/uPall)/tc;
   // empU: costo de empaque cargado a mano, en USD por millar. Si esta, manda.
   const manual = (empU!=null && isFinite(empU));
   const cEmpaque = manual ? empU/1000 : (cCaja+cPallet+cFlete);
   const totalU=cMP+cMO+cEner+cOtros+cEmpaque;
-  return {desp,mpUtil,kgRecup,cScrap,precioMP,uCaja,uPall,sinCaja,empManual:manual,cMP,cMO,cEner,cOtros,cCaja,cPallet,cFlete,cEmpaque,totalU,usdMillar:totalU*1000};
+  return {desp,mpUtil,kgRecup,cScrap,precioMP,precioCaja,uCaja,uPall,sinCaja,empManual:manual,cMP,cMO,cEner,cOtros,cCaja,cPallet,cFlete,cEmpaque,totalU,usdMillar:totalU*1000};
 }
 /* margen de bandejas en la MISMA base que PET y Laminado */
 function baMargen(precio,costo){
@@ -1745,13 +1757,14 @@ function openFormatos(i){
       <td><input class="tinp" type="number" data-fu="${k}" value="${f.u}" style="max-width:90px"></td>
       <td><input class="tinp" type="number" data-fp="${k}" value="${f.up}" style="max-width:100px"></td>
       <td class="num formula">${f.u?(f.up/f.u).toFixed(1):'\u2014'}</td>
-      <td class="num formula">${usd((S.bandejas.params.cajaARS/f.u + S.bandejas.params.palletARS/f.up)/TC()*1000,2)}</td>
+      <td><input class="tinp" type="number" data-fc="${k}" value="${+f.caja>0?f.caja:''}" placeholder="${nf(S.bandejas.params.cajaARS)}" style="max-width:100px"></td>
+      <td class="num formula">${usd(((+f.caja>0?+f.caja:S.bandejas.params.cajaARS)/f.u + S.bandejas.params.palletARS/f.up)/TC()*1000,2)}</td>
       <td><button class="mini-x" data-fdel="${k}">\u2715</button></td></tr>`).join('');
   openModal(`
     <div class="modal-h"><h3>\ud83d\udce6 Formatos de caja \u00b7 ${pr.cod}</h3><button class="x" onclick="closeModal()">\u2715</button></div>
     <div class="modal-b">
-      <div class="note" style="margin-bottom:12px">Cada canal elige despu\u00e9s cu\u00e1l de estos formatos usa para este producto. De ac\u00e1 sale el costo de empaque.</div>
-      <table><thead><tr><th>u/caja</th><th>u/pallet</th><th>cajas/pallet</th><th>empaque USD/millar</th><th></th></tr></thead>
+      <div class="note" style="margin-bottom:12px">Cada canal elige despu\u00e9s cu\u00e1l de estos formatos usa para este producto. De ac\u00e1 sale el costo de empaque. <b>$ caja</b>: precio de la caja de ese formato (ARS, sin IVA); vac\u00edo = usa el precio general.</div>
+      <table><thead><tr><th>u/caja</th><th>u/pallet</th><th>cajas/pallet</th><th title="vac\u00edo = usa el precio general de caja">$ caja</th><th>empaque USD/millar</th><th></th></tr></thead>
         <tbody id="fmtBody">${rows()}</tbody></table>
       <button class="btn sm primary" id="fmtAdd" style="margin-top:10px">+ Formato</button>
     </div>
@@ -1762,8 +1775,8 @@ function openFormatos(i){
   $('#fmtAdd').onclick=()=>{ pr.formatos=pr.formatos||[]; pr.formatos.push({u:300,up:10800}); $('#fmtBody').innerHTML=rows(); bind(); };
   $('#fmtOk').onclick=()=>{
     const nf2=[]; $$('[data-fu]').forEach(inp=>{ const k=+inp.dataset.fu;
-      const u=num(inp.value), up=num($(`[data-fp="${k}"]`).value);
-      if(u>0&&up>0) nf2.push({u,up}); });
+      const u=num(inp.value), up=num($(`[data-fp="${k}"]`).value), cj=num($(`[data-fc="${k}"]`).value);
+      if(u>0&&up>0){ const o={u,up}; if(cj>0) o.caja=cj; nf2.push(o); } });
     if(!nf2.length){ toast('Tiene que quedar al menos un formato','err'); return; }
     pushUndo('formatos de '+pr.cod);
     pr.formatos=nf2.sort((a,b)=>a.u-b.u);
@@ -1851,12 +1864,12 @@ document.addEventListener('change',e=>{
 /* number input cell */
 function nInp(path,val,{type='num',cls='',w='',step='any',edited=false}={}){
   return `<input class="tinp ${cls} ${edited?'edited':''}" style="${w?`max-width:${w}px;`:''}" type="number" step="${step}"
-    data-path="${path}" data-type="${type}" value="${val}">`;
+    data-path="${path}" data-type="${type}" value="${(typeof val==='number'&&isFinite(val))?+val.toFixed(6):val}">`;
 }
 function field(path,val,label,{type='num',unit='',sub='',step='any',options=null}={}){
   let input;
   if(options){ input=`<select data-path="${path}">${options.map(o=>`<option value="${o.v}" ${o.v==val?'selected':''}>${o.t}</option>`).join('')}</select>`; }
-  else input=`<input type="number" step="${step}" data-path="${path}" data-type="${type}" value="${val}">`;
+  else input=`<input type="number" step="${step}" data-path="${path}" data-type="${type}" value="${(typeof val==='number'&&isFinite(val))?+val.toFixed(6):val}">`;
   return `<div class="field"><label>${label}${sub?`<small>${sub}</small>`:''}</label>
     <div class="iw">${input}${unit?`<span class="unit">${unit}</span>`:''}</div></div>`;
 }
@@ -3071,7 +3084,7 @@ function renderBandejas(){
     <div class="card" style="margin-top:16px">
       <div class="card-h"><h3>Empaque y flete</h3><span class="tag">se reparte por unidades por caja y cajas por pallet</span></div>
       <div class="card-b"><div class="params-grid">
-        ${field('bandejas.params.cajaARS',p.cajaARS,'Caja de cartón',{unit:'ARS/caja'})}
+        ${field('bandejas.params.cajaARS',p.cajaARS,'Caja de cartón · general',{unit:'ARS/caja',sub:'solo para formatos sin precio propio (✎ formatos de cada producto)'})}
         ${field('bandejas.params.palletARS',p.palletARS,'Pallet',{unit:'ARS/pallet'})}
         ${field('bandejas.params.stretchARS',p.stretchARS,'Film stretch',{unit:'ARS/pallet',sub:'en clamshells es casi nulo'})}
         ${field('bandejas.params.fletePallet',p.fletePallet,'Flete a cliente',{unit:'ARS/pallet',sub:'0: se entrega en fábrica'})}
@@ -3111,7 +3124,7 @@ function renderBandejas(){
     <div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>Ensaladeras · precios por cliente</h3><span class="tag">USD/millar · Bandex en USD, resto ARS</span></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr>
-        <th title="destildar = dejó de comprar">Act.</th><th>Cliente</th><th>Producto</th><th>Moneda</th><th>Precio orig.</th><th title="costo de caja + pallet por millar de unidades">Empaque USD/mil</th><th>USD/millar</th><th>Costo</th><th>Margen USD</th><th>Bruto%</th><th>Neto%</th><th>Estado</th></tr></thead><tbody>
+        <th title="destildar = dejó de comprar">Act.</th><th>Cliente</th><th>Producto</th><th>Moneda</th><th>Precio orig.</th><th title="costo de caja + pallet por millar de unidades">Empaque USD/mil</th><th>USD/millar</th><th>Costo</th><th>Margen USD</th><th>Bruto%</th><th title="margen operativo: precio − costo − gastos sobre venta. Ganancias no se descuenta">Operativo%</th><th>Estado</th></tr></thead><tbody>
         ${ensRows.map(r=>{ const s=semaforo(r.m,null,null,'bandejas');
           return `<tr${r.activo===false?' class="row-inact"':''}><td>${chkActivo(`bandejas.ensaladeras.${r.ei}`,r.activo!==false)}</td><td style="text-align:left">${r.cli}${r.cajaCli?' <span class="tag" title="el cliente pone la caja">s/caja</span>':''}</td><td><span class="chip">${r.cod}</span></td>
           <td><select class="tsel" data-path="bandejas.ensaladeras.${r.ei}.mon"><option ${r.mon==='USD'?'selected':''}>USD</option><option ${r.mon==='ARS'?'selected':''}>ARS</option></select></td>
@@ -3133,7 +3146,7 @@ function renderBandejas(){
     <div class="grid g2" style="margin-bottom:16px">
       <div class="card">
         <div class="card-h"><h3>Clamshells · lista única</h3><span class="tag">USD/millar</span></div>
-        <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Precio</th><th>Costo</th><th>Margen USD</th><th>Bruto%</th><th>Neto%</th><th>Estado</th></tr></thead><tbody>
+        <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Precio</th><th>Costo</th><th>Margen USD</th><th>Bruto%</th><th title="margen operativo: precio − costo − gastos sobre venta. Ganancias no se descuenta">Operativo%</th><th>Estado</th></tr></thead><tbody>
           ${clamRows.map(r=>{ const s=semaforo(r.m,null,null,'bandejas');
             return `<tr><td><span class="chip teal">${r.cod}</span></td><td>${nInp(`bandejas.clamshells.${r.cod}`,r.val,{w:64})}</td>
             <td class="num">${usd(r.costo,2)}</td><td class="num">${usd(r.val-r.costo,2)}</td><td class="num">${pct(r.mb,1)}</td><td class="num"><b>${pct(r.m,1)}</b></td>
@@ -4261,7 +4274,7 @@ function baProductDetail(r,p,tc){
     <tr><td style="text-align:left">Mano de obra</td><td class="formula" style="text-align:left">$${nf(MOh)}/h ÷ ${nf(r.vel)} u/h ÷ TC</td><td class="num">${usd(r.cMO,5)}</td><td class="num">${ars(r.cMO*tc)}</td></tr>
     <tr><td style="text-align:left">Energía</td><td class="formula" style="text-align:left">MP util × ${usd(p.energia,2)}</td><td class="num">${usd(r.cEner,5)}</td><td class="num">${ars(r.cEner*tc)}</td></tr>
     <tr><td style="text-align:left">Otros</td><td class="formula" style="text-align:left">MP util × ${usd(r.otros,2)}</td><td class="num">${usd(r.cOtros,5)}</td><td class="num">${ars(r.cOtros*tc)}</td></tr>
-    <tr><td style="text-align:left">Caja de cartón</td><td class="formula" style="text-align:left">$${nf(p.cajaARS)} ÷ ${nf(r.uCaja||1)} u/caja ÷ TC</td><td class="num">${usd(r.cCaja,5)}</td><td class="num">${ars(r.cCaja*tc)}</td></tr>
+    <tr><td style="text-align:left">Caja de cartón</td><td class="formula" style="text-align:left">$${nf(r.precioCaja!=null?r.precioCaja:p.cajaARS)} ÷ ${nf(r.uCaja||1)} u/caja ÷ TC</td><td class="num">${usd(r.cCaja,5)}</td><td class="num">${ars(r.cCaja*tc)}</td></tr>
     <tr><td style="text-align:left">Pallet${p.stretchARS?' + stretch':''}</td><td class="formula" style="text-align:left">$${nf(p.palletARS+p.stretchARS)} ÷ ${nf(r.uPall||1)} u/pallet ÷ TC</td><td class="num">${usd(r.cPallet,5)}</td><td class="num">${ars(r.cPallet*tc)}</td></tr>
     ${p.fletePallet?`<tr><td style="text-align:left">Traslado Chivilcoy→Lanús</td><td class="formula" style="text-align:left">$${nf(p.fletePallet)} × ${pct(p.pctFlete,0)} ÷ ${nf(r.uPall||1)} u/pallet ÷ TC</td><td class="num">${usd(r.cFlete,5)}</td><td class="num">${ars(r.cFlete*tc)}</td></tr>`:''}
     <tr class="total"><td style="text-align:left">= Costo por unidad</td><td></td><td class="num"><b>${usd(r.totalU,5)}</b></td><td class="num">${ars(r.totalU*tc)}</td></tr>

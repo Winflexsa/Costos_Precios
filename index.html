@@ -530,7 +530,7 @@ const SEED = {
   /* ---------------- FILM PE (insumo interno) ---------------- */
   pe:{
     params:{ valorHora:8500, cargas:1.5, operarios:1.5, prodHora:30,
-      motores:6, consumoMotor:2.79, usdkwh:0.05, otrosVarios:0.01, otrosIndirectos:0.01, merma:0.10 },
+      motores:6, consumoMotor:2.79, usdkwh:0.05, otrosVarios:0.01, otrosIndirectos:0.01, merma:0.10, mpCriterio:'max' },
     insumos:[
       {cod:"PE01",desc:"PEBDC TN 7006",prov:"Alta Plástica",usd:3,upd:"30/03/2026"},
       {cod:"PE02",desc:"PEBDC TS 7006",prov:"Alta Plástica",usd:3,upd:"03/03/2026"},
@@ -1023,7 +1023,20 @@ function openTCLista(){
 function GAN_EN_MARGEN(){ return !!(S && S.cfg && S.cfg.ganEnMargen); }
 
 /* ---- FILM PE ---- */
+/* Criterio sep-2026: el PE se costea con el material MAS CARO de los que entran al costeo.
+   En modo 'max' la receta se arma sola: 100% del insumo activo de mayor USD/kg. */
+function peMaxIns(){ let b=null;
+  S.pe.insumos.forEach(i=>{ if(i.activo===false) return; if(!b||(+i.usd||0)>(+b.usd||0)) b=i; });
+  return b; }
+function peSyncReceta(){
+  if(S.pe.params.mpCriterio==='receta') return;
+  const b=peMaxIns(); if(!b) return;
+  const r=S.pe.receta;
+  if(r.length===1&&r[0].cod===b.cod&&r[0].p===1) return;
+  S.pe.receta=[{cod:b.cod,p:1}];
+}
 function calcPE(){
+  peSyncReceta();
   const p=S.pe.params, tc=TC();
   const energia=(p.motores*p.consumoMotor*p.usdkwh)/p.prodHora;
   const MO=(p.valorHora*p.operarios*p.cargas)/p.prodHora/tc;
@@ -2708,6 +2721,7 @@ function renderPE(){
   const insOpts=S.pe.insumos.map(i=>({v:i.cod,t:i.cod+' · '+i.desc}));
   const sumMix=S.pe.receta.reduce((a,r)=>a+r.p,0);
   const comp=peComponents();
+  const peMax=p.mpCriterio!=='receta', peTop=peMaxIns();
   $('#page-pe').innerHTML=`
   <div class="section-head"><div><h2>Film PE</h2><div class="sub">Film de polietileno para laminado PET/PE · insumo interno (no se vende) · solo costos</div></div>
     <div class="sh-spacer"></div>
@@ -2742,13 +2756,18 @@ function renderPE(){
 
   <div class="grid g2" style="margin-bottom:16px">
     <div class="card">
-      <div class="card-h"><h3>Receta de mezcla</h3><span class="tag" style="color:${Math.abs(sumMix-1)<0.001?'var(--green)':'var(--red)'}">suma ${pct(sumMix,0)}</span></div>
+      <div class="card-h"><h3>Receta de mezcla</h3><select class="tsel" data-path="pe.params.mpCriterio" style="margin-left:auto;max-width:220px">
+        <option value="max" ${peMax?'selected':''}>Material más caro (auto)</option>
+        <option value="receta" ${peMax?'':'selected'}>Receta manual</option></select></div>
       <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Insumo</th><th>% mezcla</th><th>USD/kg</th><th>Aporte</th></tr></thead><tbody>
         ${S.pe.receta.map((r,i)=>{ const ins=S.pe.insumos.find(x=>x.cod===r.cod)||{};
-          return `<tr><td style="text-align:left"><select class="tsel" data-path="pe.receta.${i}.cod">${insOpts.map(o=>`<option value="${o.v}" ${o.v===r.cod?'selected':''}>${o.t}</option>`).join('')}</select></td>
+          return peMax ? `<tr><td style="text-align:left"><span class="chip">${ins.cod||r.cod}</span> ${ins.desc||''}</td><td class="num">${pct(r.p,0)}</td>`
+          : `<tr><td style="text-align:left"><select class="tsel" data-path="pe.receta.${i}.cod">${insOpts.map(o=>`<option value="${o.v}" ${o.v===r.cod?'selected':''}>${o.t}</option>`).join('')}</select></td>
           <td>${nInp(`pe.receta.${i}.p`,r.p,{w:60})}</td><td class="num">${usd(ins.usd||0,2)}</td><td class="num">${usd(r.p*(ins.usd||0),3)}</td></tr>`;}).join('')}
       </tbody></table></div>
-      <div class="note" style="margin-top:8px">El % de mezcla debe sumar 100%. Merma del proceso: ${pct(p.merma,0)}.</div></div></div>
+      <div class="note" style="margin-top:8px">${peMax
+        ? `Criterio: se costea con el material <b>más caro</b> de los que tienen tildado “Costeo” en el catálogo${peTop?` → hoy <b>${peTop.cod}</b> (${usd(peTop.usd,2)}/kg)`:''}. Cambia solo al cargar precios. Merma del proceso: ${pct(p.merma,0)}.`
+        : `El % de mezcla debe sumar ${pct(1,0)} (hoy ${pct(sumMix,0)}). Merma del proceso: ${pct(p.merma,0)}.`}</div></div></div>
     <div class="card">
       <div class="card-h"><h3>Parámetros del costo</h3><span class="tag">tocá y recalcula</span></div>
       <div class="card-b"><div class="params-grid">
@@ -2767,8 +2786,8 @@ function renderPE(){
 
   <div class="card">
     <div class="card-h"><h3>Catálogo de insumos PE</h3><span class="tag">editá USD/kg</span></div>
-    <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Cód</th><th>Descripción</th><th>Prov.</th><th>USD/kg</th><th>ARS/kg</th><th>Act.</th></tr></thead><tbody>
-      ${S.pe.insumos.map((m,i)=>`<tr><td><span class="chip">${m.cod}</span></td><td style="white-space:normal;text-align:left">${m.desc}</td><td style="text-align:left">${m.prov}</td>
+    <div class="card-b"><div class="tbl-wrap"><table><thead><tr><th>Costeo</th><th>Cód</th><th>Descripción</th><th>Prov.</th><th>USD/kg</th><th>ARS/kg</th><th>Act.</th></tr></thead><tbody>
+      ${S.pe.insumos.map((m,i)=>`<tr${m.activo===false?' style="opacity:.5"':''}><td>${chkActivo(`pe.insumos.${i}`,m.activo!==false)}</td><td><span class="chip">${m.cod}</span>${peTop&&peTop.cod===m.cod?' <span class="pill a" title="material con el que se costea">más caro</span>':''}</td><td style="white-space:normal;text-align:left">${m.desc}</td><td style="text-align:left">${m.prov}</td>
         <td>${nInp(`pe.insumos.${i}.usd`,m.usd,{w:70})}</td><td class="num">${ars(m.usd*tc)}</td>
         <td><input class="tinp" style="max-width:96px;text-align:left;font-family:'IBM Plex Sans'" data-path="pe.insumos.${i}.upd" value="${m.upd}"></td></tr>`).join('')}
     </tbody></table></div></div></div>`;

@@ -2176,7 +2176,7 @@ function renderPET(){
           <div class="params-sub">Proceso</div>
           ${field('pet.params.energia',p.energia,'Energía',{unit:'USD/kg'})}
           ${field('pet.params.valorHora',p.valorHora,'Valor hora MO',{unit:'ARS/h'})}
-          ${field('pet.params.operarios',p.operarios,'Operarios/turno',{unit:'pers'})}
+          ${field('pet.params.operarios',p.operarios,'Operarios por hora de línea',{unit:'pers',sub:'4 op × 9 h ÷ 14 h = 2,6'})}
           ${field('pet.params.cargas',p.cargas,'Cargas sociales',{unit:'×'})}
           ${field('pet.params.prodHora',p.prodHora,'Producción',{unit:'kg/h'})}
           ${field('pet.params.merma',(p.merma*100),'Merma proceso',{type:'pctnum',unit:'%'})}
@@ -2225,6 +2225,7 @@ function renderPET(){
           <select id="petFMat"><option value="">Material: todos</option>${mats.map(m=>`<option ${petFilter.mat===m?'selected':''}>${m}</option>`).join('')}</select>
           <select id="petFCol"><option value="">Color: todos</option>${cols.map(c=>`<option ${petFilter.col===c?'selected':''}>${c}</option>`).join('')}</select>
           ${filtered?`<button class="btn sm" id="petFClear">Limpiar</button>`:''}
+          ${S.pet.propuesta?`<button class="btn sm amber" id="petProp">🧾 Revisar propuesta (${propPend()})</button>`:`<button class="btn sm" id="petPropLoad">📥 Cargar propuesta</button>`}
           <button class="btn sm" id="petReport">📋 Informe</button>
           <button class="btn sm" id="petSaveList">💾 Guardar lista</button>
           <button class="btn sm" id="petHistList">🕘 Historial</button>
@@ -2251,7 +2252,7 @@ function renderPET(){
           <td><input class="tinp" style="max-width:130px;text-align:left;font-family:'IBM Plex Sans'" data-path="pet.clientes.${r.i}.cli" value="${r.cli}"></td>
           <td><select class="tsel" data-path="pet.clientes.${r.i}.v">${opts.map(o=>`<option value="${o.v}" ${o.v==r.v?'selected':''}>${o.t}</option>`).join('')}</select></td>
           <td class="hist-cell">${celdaAnterior(r,'pet',r.i,2)}</td>
-          <td>${nInp(`pet.clientes.${r.i}.act`,r.act,{w:82,cls:'precio-vig'})}</td>
+          <td>${nInp(`pet.clientes.${r.i}.act`,r.act,{w:82,cls:'precio-vig'})}${(()=>{const pp=propDePet(r.i);return pp?`<div class="formula" style="font-size:10px;color:var(--amber);cursor:pointer" data-goprop title="Hay un precio propuesto pendiente de revisar">propuesto ${usd(+pp.prop,2)}</div>`:'';})()}</td>
           <td class="num delta ${ar>0.0001?'up':ar<-0.0001?'down':'flat'}">${r.ant&&r.ant!==r.act?`${ar>0?'+':''}${pct(ar,1)}`:'—'}${r.antD?`<div class="formula" style="font-size:10px;opacity:.7">desde ${fmtFecha(r.antD)}</div>`:''}</td>
           <td class="num">${usd(r.costo,2)}</td>
           <td class="num">${pct(r.margenBruto,1)}</td>
@@ -2291,6 +2292,9 @@ function renderPET(){
     $('#petFCol').onchange=e=>{ petFilter.col=e.target.value; renderPET(); };
     if($('#petFClear')) $('#petFClear').onclick=()=>{ petSearch=''; petFilter={mat:'',col:''}; renderPET(); };
     $('#petReport').onclick=openPetReport;
+    if($('#petProp')) $('#petProp').onclick=openPropuestaPET;
+    if($('#petPropLoad')) $('#petPropLoad').onclick=openCargarPropuestaPET;
+    $$('#page-pet [data-goprop]').forEach(d=>d.onclick=openPropuestaPET);
     $('#petSaveList').onclick=petListSave;
     $('#petHistList').onclick=openPetListHistory;
     $('#petAdd').onclick=()=>{ S.pet.clientes.push({cli:'Nuevo cliente',v:0,ant:0,act:0}); commit(); renderPET(); };
@@ -2390,6 +2394,130 @@ async function exportPetReport(dim,groups){
   petTitle(wb,ws,'PET Lámina · Informe por '+labels[dim],H.length); setCols(ws,H); headerRow(ws,4,H); dataRows(ws,5,H,groups);
   ws.views=[{state:'frozen',ySplit:4}];
   await download(wb,'Winflex_PET_informe_'+dim+'.xlsx');
+}
+
+/* ============================================================
+   PROPUESTA DE PRECIOS PET — revisión ítem por ítem
+   El agente deja en S.pet.propuesta una lista de precios sugeridos.
+   Matías revisa uno por uno: ✓ aplica el precio (queda registrado como
+   cambio de precio normal, con anterior e historial); ✗ lo descarta.
+   Todo se guarda al instante, se puede seguir otro día.
+   ============================================================ */
+let propFiltro='pend';
+function propIdx(it){
+  const c=S.pet.clientes[it.i];
+  if(c && c.cli===it.cli && String(c.v)===String(it.v)) return it.i;
+  const j=S.pet.clientes.findIndex(x=>x.cli===it.cli && String(x.v)===String(it.v));
+  return j;
+}
+function propPend(){ const P=S.pet.propuesta; return P?P.items.filter(x=>x.estado==='pend').length:0; }
+function propDePet(i){ const P=S.pet.propuesta; if(!P) return null;
+  return P.items.find(x=>x.estado==='pend' && propIdx(x)===i)||null; }
+function propRespaldo(){
+  const P=S.pet.propuesta; if(!P || P.respaldo) return;
+  S.history=S.history||[];
+  S.history.unshift({id:Date.now(),date:nowISO(),label:'Auto · respaldo antes de aplicar '+P.label,snap:priceSnapshot()});
+  if(S.history.length>50) S.history.length=50;
+  P.respaldo=nowISO();
+}
+function propAplicar(it){
+  const i=propIdx(it); if(i<0){ toast('No encuentro a '+it.cli+' en la lista','err'); return false; }
+  const c=S.pet.clientes[i]; propRespaldo();
+  it.prevAct=c.act; it.prevAnt=c.ant; it.prevAntD=c.antD; it.prevHist=clone(c.hist||[]);
+  priceCommit(c,'act',+it.prop);
+  it.estado='ok'; it.fechaDec=nowISO(); return true;
+}
+function propDeshacer(it){
+  const i=propIdx(it);
+  if(it.estado==='ok' && i>=0){ const c=S.pet.clientes[i];
+    c.act=it.prevAct; c.ant=it.prevAnt; c.antD=it.prevAntD; c.hist=it.prevHist||[];
+    if(c.antD==null) delete c.antD; }
+  it.estado='pend'; delete it.fechaDec;
+}
+function openCargarPropuestaPET(){
+  openModal(`<div class="modal-h"><h3>📥 Cargar propuesta de precios</h3><button class="x" onclick="closeModal()">✕</button></div>
+   <div class="modal-b">
+    <div class="note" style="margin-bottom:10px">Elegí el archivo <b>.json</b> de propuesta que armó el agente (o pegá su contenido). No cambia ningún precio: solo deja la propuesta lista para revisar uno por uno.</div>
+    <input type="file" id="propFile" accept=".json,application/json" style="margin-bottom:10px">
+    <textarea id="propTxt" rows="6" style="width:100%;font-family:'IBM Plex Mono';font-size:11px" placeholder="…o pegá acá el contenido del archivo"></textarea>
+    <div id="propChk" class="note" style="margin-top:8px"></div>
+   </div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancelar</button><button class="btn primary" id="propLoad" disabled>Cargar propuesta</button></div>`);
+  let data=null;
+  const check=txt=>{ data=null; $('#propLoad').disabled=true;
+    try{ const d=JSON.parse(txt);
+      if(!d||d.modulo!=='pet'||!Array.isArray(d.items)) throw new Error('no es una propuesta de PET');
+      const ok=d.items.filter(it=>propIdx(it)>=0).length, falta=d.items.length-ok;
+      $('#propChk').innerHTML=`<b>${d.label||'Propuesta'}</b> · ${d.items.length} ítems · ${ok} encontrados en la lista${falta?` · <span style="color:var(--red)">${falta} no encontrados (se van a ver en gris)</span>`:''}${S.pet.propuesta?'<br><span style="color:var(--amber)">Ya hay una propuesta abierta: se va a reemplazar (la actual pasa al historial de propuestas).</span>':''}`;
+      data=d; $('#propLoad').disabled=false;
+    }catch(e){ $('#propChk').innerHTML=txt.trim()?`<span style="color:var(--red)">Archivo inválido: ${e.message}</span>`:''; } };
+  $('#propTxt').oninput=e=>check(e.target.value);
+  $('#propFile').onchange=e=>{ const f=e.target.files[0]; if(!f) return; f.text().then(t=>{ $('#propTxt').value=t; check(t); }); };
+  $('#propLoad').onclick=()=>{ if(!data) return;
+    if(S.pet.propuesta){ S.pet.propuesta.cerrada=nowISO(); S.pet.propHist=S.pet.propHist||[]; S.pet.propHist.unshift(S.pet.propuesta); if(S.pet.propHist.length>20) S.pet.propHist.length=20; }
+    const {modulo,...P}=data; P.items=P.items.map(it=>({...it,estado:'pend'})); P.cargada=nowISO();
+    S.pet.propuesta=P; commit(); closeModal(); renderActive(); toast('Propuesta cargada · nada cambió todavía','ok'); openPropuestaPET(); };
+}
+
+function openPropuestaPET(){
+  const P=S.pet.propuesta;
+  if(!P){ openModal(`<div class="modal-h"><h3>🧾 Propuesta de precios</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-b"><div class="empty">No hay ninguna propuesta pendiente.</div></div>
+    <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Cerrar</button></div>`); return; }
+  const vr=petVariantes(), n=NET(), G=n.admin+n.iibb+n.dyc+n.financiero;
+  const all=P.items.map((it,k)=>{ const i=propIdx(it); const c=i>=0?S.pet.clientes[i]:null;
+    const costo=c?(vr[+c.v]||vr[0]).cFlete:0;
+    const vig = it.estado==='ok' ? it.prevAct : (c?c.act:it.vig);
+    const mOf=p=>p?(p-costo-p*G)/p:0;
+    return {...it,k,i,costo,vigHoy:vig,mVig:mOf(vig),mProp:mOf(+it.prop),delta:vig?(+it.prop/vig-1):0,
+      variante:c?(vr[+c.v]||vr[0]).nom:'—', falta:!c}; });
+  all.sort((a,b)=>a.mVig-b.mVig);
+  const cnt={pend:0,ok:0,no:0}; all.forEach(x=>cnt[x.estado]++);
+  const rows=all.filter(x=>propFiltro==='todos'||x.estado===propFiltro);
+  const est=x=> x.estado==='ok'?'<span class="pill v">Aplicado</span>':x.estado==='no'?'<span class="pill r">Descartado</span>':'<span class="pill a">Pendiente</span>';
+  openModal(`<div class="modal-h"><h3>🧾 ${P.label}</h3><button class="x" onclick="closeModal()">✕</button></div>
+   <div class="modal-b">
+    <div class="note" style="margin-bottom:10px">${P.criterio||''}<br>Armada por ${P.autor||'el agente'} el ${fmtFecha((P.fecha||'').slice(0,10))} · costo al ${P.costoRef||'día'}. Revisá uno por uno: <b>✓</b> aplica el precio (queda como cambio registrado, con anterior e historial), <b>✗</b> lo deja como está. Podés corregir el propuesto antes de aplicar. Todo se guarda al instante.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      ${[['pend','Pendientes'],['ok','Aplicados'],['no','Descartados'],['todos','Todos']].map(f=>`<button class="btn sm ${propFiltro===f[0]?'primary':''}" data-pf="${f[0]}">${f[1]}${f[0]!=='todos'?` (${cnt[f[0]]})`:''}</button>`).join('')}
+    </div>
+    <div class="tbl-wrap"><table style="table-layout:auto"><thead><tr><th style="width:1%;text-align:left">Decisión</th><th style="text-align:left">Cliente</th><th style="text-align:left">Variante</th><th>Vigente</th><th>Propuesto</th><th>Δ</th><th>M.Oper. vigente</th><th>M.Oper. propuesto</th></tr></thead><tbody>
+    ${rows.length?rows.map(x=>{ const s1=semaforo(x.mVig,null,null,'pet'), s2=semaforo(x.mProp,null,null,'pet');
+      return `<tr${x.falta?' class="row-inact"':''}>
+        <td style="white-space:nowrap;text-align:left">${x.estado==='pend'
+          ?`<button class="btn sm primary" data-pok="${x.k}" ${x.falta?'disabled':''} title="Aplicar precio">✓</button> <button class="btn sm" data-pno="${x.k}" title="Mantener precio vigente">✗</button>`
+          :`${est(x)} <button class="btn sm" data-pundo="${x.k}" title="Volver a pendiente">↺</button>`}</td>
+        <td style="text-align:left;white-space:normal;max-width:200px"><b>${x.cli}</b>${x.motivo?`<div class="note" style="font-size:10px;white-space:normal">${x.motivo}</div>`:''}</td><td style="text-align:left">${x.variante}</td>
+        <td class="num">${usd(x.vigHoy,2)}</td>
+        <td>${x.estado==='pend'?`<input class="tinp" style="width:70px" data-pprop="${x.k}" value="${(+x.prop).toFixed(2)}">`:`<b>${usd(+x.prop,2)}</b>`}</td>
+        <td class="num delta ${x.delta>0.0001?'up':x.delta<-0.0001?'down':'flat'}">${x.delta>0?'+':''}${pct(x.delta,1)}</td>
+        <td><span class="pill ${s1}" title="costo ${usd(x.costo,3)}/kg">${pct(x.mVig,1)}</span></td>
+        <td><span class="pill ${s2}">${pct(x.mProp,1)}</span></td></tr>`;}).join('')
+      :`<tr><td colspan="7" class="empty" style="padding:18px">Nada en esta vista.</td></tr>`}
+    </tbody></table></div>
+    <div class="note" style="margin-top:8px">Ordenado de peor a mejor margen vigente. El primer ✓ guarda automáticamente una versión de respaldo en el Historial de listas.</div>
+   </div>
+   <div class="modal-foot">
+    ${cnt.pend?`<button class="btn" id="propAllOk">✓ Aplicar los ${cnt.pend} pendientes</button>`:''}
+    <button class="btn" id="propClose">📁 Cerrar propuesta</button>
+    <button class="btn primary" onclick="closeModal();renderActive()">Listo</button></div>`,true);
+  const again=()=>{ commit(); openPropuestaPET(); };
+  $$('#modal [data-pf]').forEach(b=>b.onclick=()=>{ propFiltro=b.dataset.pf; openPropuestaPET(); });
+  $$('#modal [data-pprop]').forEach(inp=>inp.onchange=()=>{ const v=num(inp.value); if(v>0){ P.items[+inp.dataset.pprop].prop=Math.round(v*100)/100; P.items[+inp.dataset.pprop].editado=true; again(); } });
+  $$('#modal [data-pok]').forEach(b=>b.onclick=()=>{ if(propAplicar(P.items[+b.dataset.pok])){ toast('Precio aplicado','ok'); again(); } });
+  $$('#modal [data-pno]').forEach(b=>b.onclick=()=>{ const it=P.items[+b.dataset.pno]; it.estado='no'; it.fechaDec=nowISO(); again(); });
+  $$('#modal [data-pundo]').forEach(b=>b.onclick=()=>{ propDeshacer(P.items[+b.dataset.pundo]); again(); });
+  if($('#propAllOk')) $('#propAllOk').onclick=()=>{
+    if(!confirm(`¿Aplicar los ${cnt.pend} precios pendientes tal como están?`)) return;
+    let n=0; P.items.filter(x=>x.estado==='pend').forEach(x=>{ if(propAplicar(x)) n++; });
+    toast(n+' precios aplicados','ok'); again(); };
+  $('#propClose').onclick=()=>{
+    const msg=cnt.pend?`Quedan ${cnt.pend} pendientes: se cierran SIN aplicar. ¿Cerrar la propuesta?`:'¿Cerrar la propuesta? Queda en el historial de propuestas.';
+    if(!confirm(msg)) return;
+    P.items.forEach(x=>{ if(x.estado==='pend') x.estado='no'; });
+    P.cerrada=nowISO(); S.pet.propHist=S.pet.propHist||[]; S.pet.propHist.unshift(P);
+    if(S.pet.propHist.length>20) S.pet.propHist.length=20;
+    delete S.pet.propuesta; commit(); closeModal(); renderActive(); toast('Propuesta cerrada','ok'); };
 }
 
 /* ---- Guardado e historial de la lista de precios PET ---- */
